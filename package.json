@@ -1,0 +1,36 @@
+{
+  "name": "cebularz",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+  "wallet": "tsx src/wallet/wallet_cli.ts",
+    "node": "tsx src/node.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sekulas/Cebularz.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/sekulas/Cebularz/issues"
+  },
+  "homepage": "https://github.com/sekulas/Cebularz#readme",
+  "dependencies": {
+    "@types/express": "^5.0.3",
+    "@types/inquirer": "^9.0.9",
+    "@types/node": "^24.7.2",
+    "axios": "^1.12.2",
+    "commander": "^14.0.1",
+    "express": "^5.1.0",
+    "inquirer": "^12.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
