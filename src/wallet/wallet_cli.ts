@@ -46,4 +46,41 @@ program
     });
   });
 
+program
+  .command('sign-message')
+  .argument('<file>', 'wallet file path')
+  .argument('<id>', 'identity id')
+  .requiredOption('-m, --message <message>', 'message to sign')
+  .action(async (file, id, opts) => {
+    const wallet = await Wallet.open(file);
+    const { password } = await inquirer.prompt([
+      { type: 'password', name: 'password', message: 'Password', mask: '*' }
+    ]);
+    try {
+      const signatureB64 = wallet.signMessage(id, password, opts.message);
+      console.log('signature(base64)=', signatureB64);
+    } catch (e) {
+      console.error('Signing failed:', (e as Error).message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('verify-message')
+  .argument('<file>', 'wallet file path')
+  .argument('<id>', 'identity id')
+  .requiredOption('-m, --message <message>', 'original message')
+  .requiredOption('-s, --signature <signatureB64>', 'signature in base64')
+  .action(async (file, id, opts) => {
+    const wallet = await Wallet.open(file);
+    try {
+      const ok = wallet.verifyMessage(id, opts.message, opts.signature);
+      console.log(ok ? 'VALID' : 'INVALID');
+      process.exit(ok ? 0 : 2);
+    } catch (e) {
+      console.error('Verification failed:', (e as Error).message);
+      process.exit(1);
+    }
+  });
+
 program.parseAsync(process.argv);

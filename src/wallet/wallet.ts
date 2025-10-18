@@ -1,5 +1,6 @@
 import { readFile, writeFile, access } from 'fs/promises';
 import { generateIdentity, decryptPrivateKey, type IdentityRecord } from './identity.js';
+import { createPrivateKey, createPublicKey, sign as edSign, verify as edVerify } from 'crypto';
 
 export interface WalletFile {
   version: 1;
@@ -59,6 +60,21 @@ export class Wallet {
     const identity = this.data.identities.find(i => i.id === id);
     if (!identity) throw new Error('Identity not found');
     return decryptPrivateKey(identity.encPriv, password);
+  }
+
+  signMessage(id: string, password: string, message: string): string {
+    const privPem = this.decryptPrivateKey(id, password);
+    const keyObj = createPrivateKey(privPem);
+    const signature = edSign(null, Buffer.from(message, 'utf8'), keyObj);
+    return signature.toString('base64');
+  }
+
+  verifyMessage(id: string, message: string, signatureB64: string): boolean {
+    const pubPem = this.getPublicKey(id);
+    if (!pubPem) throw new Error('Identity not found');
+    const keyObj = createPublicKey(pubPem);
+    const signature = Buffer.from(signatureB64, 'base64');
+    return edVerify(null, Buffer.from(message, 'utf8'), keyObj, signature);
   }
 
   async save(): Promise<void> {

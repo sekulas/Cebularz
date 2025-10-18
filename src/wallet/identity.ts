@@ -1,14 +1,12 @@
 import { generateKeyPairSync, randomBytes, scryptSync, createCipheriv, createDecipheriv, createHash } from 'crypto';
 
-export const HASH_ID_ALGO = 'sha1';
+export const HASH_ID_ALGO = 'sha256';
 export const SALT_LENGTH = 16;
 export const AES_GCM_IV_LENGTH = 12;
 export const BASE_64 = 'base64';
 
 export interface KdfParams { N: number; r: number; p: number; dkLen: number }
-
-// N lowered from 2^15 to 2^14 due to observed memory limit in runtime environment.
-export const KDF_DEFAULT: Readonly<KdfParams> = Object.freeze({ N: 1 << 14, r: 8, p: 1, dkLen: 32 });
+export const KDF_DEFAULT: Readonly<KdfParams> = Object.freeze({ N: 1 << 15, r: 8, p: 1, dkLen: 32 });
 
 export interface EncryptedPrivateKey {
   ct: string;      
@@ -27,7 +25,6 @@ export interface IdentityRecord {
 }
 
 export function generateIdentity(label: string, password: string): IdentityRecord {
-  // 1. Generate Ed25519 key pair as PEM strings via helper (avoids unsafe casting).
   const { publicKey, privateKey } = generateEd25519PemPair();
   const id = computeIdentityId(publicKey);
   const encPriv = encryptPrivateKey(privateKey, password);
