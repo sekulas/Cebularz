@@ -45,10 +45,6 @@ export class CebularzNode {
     });
   }
 
-  private addPeer(url: string) {
-    this.peers.add(url);
-  }
-
   private async registerAt(peerUrl: string) {
     try {
       const myUrl = `http://localhost:${this.port}`;
@@ -67,7 +63,7 @@ export class CebularzNode {
         }
       }
 
-      this.addPeer(peerUrl);
+      this.peers.add(peerUrl);
 
       const responder = data.responder || peerUrl;
       console.log(`[node:${this.port}] register request accepted by ${responder}`);
