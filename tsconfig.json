@@ -1,0 +1,33 @@
+{
+  // Visit https://aka.ms/tsconfig to read more about this file
+  "compilerOptions": {
+  // File Layout (no build output needed now, rootDir optional for tsx)
+  "rootDir": "./src",
+
+    // Environment Settings
+    "module": "nodenext",
+    "target": "esnext",
+
+    // For nodejs:
+    "lib": ["esnext"],
+    "types": ["node"],
+
+    // Stricter Typechecking Options
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
+    // Recommended Options
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+
+    // Added
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    // Build artifacts no longer needed (running via tsx)
+    // "sourceMap": true,
+    // "declaration": true,
+  }
+}
