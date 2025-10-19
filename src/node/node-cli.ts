@@ -13,6 +13,14 @@ program
   .option('-b, --bootstrap <urls>', 'comma separated bootstrap peer URLs (http://localhost:4000,http://localhost:4001)')
   .action(opts => {
     const port = parseInt(opts.port, 10);
+    if (
+      isNaN(port) ||
+      port < 1 ||
+      port > 65535
+    ) {
+      console.error('Error: Invalid port specified. Please provide a port number between 1 and 65535 using the -p or --port option.');
+      process.exit(1);
+    }
     let bootstrap: string[] | undefined;
     if (opts.bootstrap) {
       bootstrap = String(opts.bootstrap)

@@ -76,7 +76,7 @@ export class CebularzNode {
     this.app.listen(this.port, () => {
       console.log(`[node:${this.port}] listening`);
 
-      if (this.bootstrap && this.bootstrap.length) {
+      if (this.bootstrap.length) {
         for (const peer of this.bootstrap) {
           this.registerAt(peer);
         }
@@ -89,7 +89,13 @@ export class CebularzNode {
 
 private async pingPeers() {
   for (const url of this.peers) {
-    const peerPort = parseInt(url.split(':').pop()!, 10);
+    let peerPort: number;
+    try {
+      const parsed = new URL(url);
+      peerPort = parseInt(parsed.port, 10);
+    } catch {
+      peerPort = NaN;
+    }
     console.log(`[node:${this.port}] ping -> ${peerPort}`);
     try {
       const resp = await fetch(`${url}/ping?from=${this.port}`);
