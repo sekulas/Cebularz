@@ -18,7 +18,9 @@
     "exactOptionalPropertyTypes": true,
 
     // Recommended Options
-    "verbatimModuleSyntax": true,
+    // Enable interop for CommonJS default imports like express
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
