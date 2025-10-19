@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "wallet": "tsx src/wallet/wallet_cli.ts",
+    "wallet": "tsx src/wallet/wallet-cli.ts",
     "node": "tsx src/node.ts"
   },
   "repository": {

@@ -2,6 +2,8 @@
 import { Command } from 'commander';
 import inquirer from 'inquirer';
 import { Wallet } from './wallet.js';
+import { BASE64 } from './const.js';
+import { assertStrongPassword, estimatePasswordStrength } from './password-strength.js';
 
 const program = new Command();
 program
@@ -17,9 +19,29 @@ program
       console.error('File already exists.');
       process.exit(1);
     }
+    const { masterPassword } = await inquirer.prompt([
+      { type: 'password', name: 'masterPassword', message: 'Set master password', mask: '*' }
+    ]);
+    let strength = estimatePasswordStrength(masterPassword);
+    try {
+      assertStrongPassword(masterPassword);
+    } catch (e) {
+      console.error((e as Error).message);
+      console.error('Warning: Chosen master password is weak.');
+      const { cont } = await inquirer.prompt([
+        { type: 'confirm', name: 'cont', message: 'Continue anyway with weak password?', default: false }
+      ]);
+      if (!cont) {
+        console.log('Aborted. Wallet not created.');
+        process.exit(2);
+      }
+      strength = estimatePasswordStrength(masterPassword);
+    }
     const wallet = await Wallet.create(file);
+    wallet.initializeMaster(masterPassword);
+    await wallet.save();
     console.log('Wallet created:', file);
-    console.log('CreatedAt:', wallet['data'].createdAt);
+    console.log(`Master password entropy≈${strength.entropyBits} bits`);
   });
 
 program
@@ -28,12 +50,17 @@ program
   .option('-l, --label <label>', 'label', 'identity')
   .action(async (file, opts) => {
     const wallet = await Wallet.open(file);
-    const { password } = await inquirer.prompt([
-      { type: 'password', name: 'password', message: 'Password to encrypt private key', mask: '*' }
+    const { masterPassword } = await inquirer.prompt([
+      { type: 'password', name: 'masterPassword', message: 'Master password', mask: '*' }
     ]);
-    const id = wallet.addIdentity(opts.label, password).id;
-    await wallet.save();
-    console.log('Added identity id=', id);
+    try {
+      const id = wallet.addIdentity(opts.label, masterPassword).id;
+      await wallet.save();
+      console.log('Added identity id=', id);
+    } catch (e) {
+      console.error('Failed to add identity:', (e as Error).message);
+      process.exit(1);
+    }
   });
 
 program
@@ -53,12 +80,12 @@ program
   .requiredOption('-m, --message <message>', 'message to sign')
   .action(async (file, id, opts) => {
     const wallet = await Wallet.open(file);
-    const { password } = await inquirer.prompt([
-      { type: 'password', name: 'password', message: 'Password', mask: '*' }
+    const { masterPassword } = await inquirer.prompt([
+      { type: 'password', name: 'masterPassword', message: 'Master password', mask: '*' }
     ]);
     try {
-      const signatureB64 = wallet.signMessage(id, password, opts.message);
-      console.log('signature(base64)=', signatureB64);
+      const signatureB64 = wallet.signMessage(id, masterPassword, opts.message);
+      console.log(`signature(${BASE64})=`, signatureB64);
     } catch (e) {
       console.error('Signing failed:', (e as Error).message);
       process.exit(1);
