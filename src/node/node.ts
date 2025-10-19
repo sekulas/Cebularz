@@ -80,7 +80,7 @@ export class CebularzNode {
     this.app.listen(this.port, () => {
       console.log(`[node:${this.port}] listening`);
 
-      if (this.bootstrap && this.bootstrap.length) {
+      if (this.bootstrap.length) {
         for (const peer of this.bootstrap) {
           this.registerAt(peer);
         }
