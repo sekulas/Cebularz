@@ -35,7 +35,6 @@ program
         console.log('Aborted. Wallet not created.');
         process.exit(2);
       }
-      strength = estimatePasswordStrength(masterPassword);
     }
     const wallet = await Wallet.create(file);
     wallet.initializeMaster(masterPassword);
