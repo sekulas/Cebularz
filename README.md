@@ -1,5 +1,4 @@
-# CLI Usage Examples
-
+# CLI Wallet Usage Examples
 Initialize a new wallet:
 ```
 npm run wallet -- init mywallet.json
@@ -20,17 +19,19 @@ Verify a message:
 ```
 npm run wallet -- verify-message mywallet.json <identityId> -m 'hello world' -s <signatureB64>
 ```
+(Use `--` after `npm run wallet` to forward CLI arguments.)
 
-(Use `--` after `npm run wallet` to forward CLI arguments if needed.)
 
-
-## Development
-
-Type check:
+# CLI Node Usage Examples
+Terminal 1:
 ```
-npx tsc --noEmit
+npm run node -- -p 4000
 ```
-Run CLI directly:
+Terminal 2:
 ```
-npx tsx src/wallet/wallet-cli.ts list mywallet.json
+npm run node -- -p 4001 -b http://localhost:4000
+```
+Terminal 3:
+```
+npm run node -- -p 4002 -b http://localhost:4000,http://localhost:4001
 ```
