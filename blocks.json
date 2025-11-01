@@ -1,0 +1,172 @@
+{
+  "blocks": [
+    {
+      "index": 0,
+      "timestamp": 1730000000000,
+      "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "data": {
+        "name": "Cebularz Genesis",
+        "note": "Harcoded genesis to prevent fake chains"
+      },
+      "nonce": 0,
+      "difficulty": 3,
+      "hash": "fc40deb3a9d9dc91c81a8c970954c20b800575db76fa0492f2bb36618c10ed32"
+    },
+    {
+      "index": 1,
+      "timestamp": 1761065608662,
+      "previousHash": "fc40deb3a9d9dc91c81a8c970954c20b800575db76fa0492f2bb36618c10ed32",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 3294,
+      "difficulty": 3,
+      "hash": "000a3dc098a70032eafe61bbf0a8ef591225fd3231c2674e2a20ca19987945fd"
+    },
+    {
+      "index": 2,
+      "timestamp": 1761065613665,
+      "previousHash": "000a3dc098a70032eafe61bbf0a8ef591225fd3231c2674e2a20ca19987945fd",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 3702,
+      "difficulty": 3,
+      "hash": "0004be9d888b8cc35ab2decc315b52f07cf3ccc84e9fe82d923157ce6ad4368b"
+    },
+    {
+      "index": 3,
+      "timestamp": 1761065618708,
+      "previousHash": "0004be9d888b8cc35ab2decc315b52f07cf3ccc84e9fe82d923157ce6ad4368b",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 7375,
+      "difficulty": 3,
+      "hash": "0009d8c555e78cbd5a32b9a6db52911d97e66c31c7a72198e65ffad27a0ebcba"
+    },
+    {
+      "index": 4,
+      "timestamp": 1761065623674,
+      "previousHash": "0009d8c555e78cbd5a32b9a6db52911d97e66c31c7a72198e65ffad27a0ebcba",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 2183,
+      "difficulty": 3,
+      "hash": "00057adf1cc98e24dc86accc10cebeb489d2bc9060731e86a7150cdbe7967803"
+    },
+    {
+      "index": 5,
+      "timestamp": 1761065628680,
+      "previousHash": "00057adf1cc98e24dc86accc10cebeb489d2bc9060731e86a7150cdbe7967803",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 1334,
+      "difficulty": 3,
+      "hash": "00069e7c34cec6eee27d262479fadd0fd5505ed63079e9eab6008e438b1bffe4"
+    },
+    {
+      "index": 6,
+      "timestamp": 1761065633679,
+      "previousHash": "00069e7c34cec6eee27d262479fadd0fd5505ed63079e9eab6008e438b1bffe4",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 2401,
+      "difficulty": 3,
+      "hash": "000fa7cdccefd1f2b220c4e59d8efba56b924e2d282df013bd23da6efea24388"
+    },
+    {
+      "index": 7,
+      "timestamp": 1761065638693,
+      "previousHash": "000fa7cdccefd1f2b220c4e59d8efba56b924e2d282df013bd23da6efea24388",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 9864,
+      "difficulty": 3,
+      "hash": "000c834caa4149159c56779eaadbe0f9753c50b71f9c59c51a768a1bd984ae90"
+    },
+    {
+      "index": 8,
+      "timestamp": 1761065643699,
+      "previousHash": "000c834caa4149159c56779eaadbe0f9753c50b71f9c59c51a768a1bd984ae90",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 8578,
+      "difficulty": 3,
+      "hash": "0001583d7f8f9b0e29e4be877fc537244c7392869f05fedaf79a3465dc9202d9"
+    },
+    {
+      "index": 9,
+      "timestamp": 1761065648689,
+      "previousHash": "0001583d7f8f9b0e29e4be877fc537244c7392869f05fedaf79a3465dc9202d9",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 260,
+      "difficulty": 3,
+      "hash": "00078d159cab68a897ed1697b72688d00be5ca5bf84d0a5a78590e2028f09aeb"
+    },
+    {
+      "index": 10,
+      "timestamp": 1761065653712,
+      "previousHash": "00078d159cab68a897ed1697b72688d00be5ca5bf84d0a5a78590e2028f09aeb",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 14027,
+      "difficulty": 3,
+      "hash": "00021d5ba1d97d8e501fdcf364713d7faf5b524211ef512928846f9a177da408"
+    },
+    {
+      "index": 11,
+      "timestamp": 1761065658757,
+      "previousHash": "00021d5ba1d97d8e501fdcf364713d7faf5b524211ef512928846f9a177da408",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 18936,
+      "difficulty": 3,
+      "hash": "0003d526cc53df83aba23496cfc250a4906807caff2b74cb44354686943294da"
+    },
+    {
+      "index": 12,
+      "timestamp": 1761065663695,
+      "previousHash": "0003d526cc53df83aba23496cfc250a4906807caff2b74cb44354686943294da",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 1171,
+      "difficulty": 3,
+      "hash": "0002a59ae77ecf03e15be9638e15652793e1e635ae3a090f3df73ab55f91650d"
+    },
+    {
+      "index": 13,
+      "timestamp": 1761065668729,
+      "previousHash": "0002a59ae77ecf03e15be9638e15652793e1e635ae3a090f3df73ab55f91650d",
+      "data": {
+        "miner": 4500,
+        "note": "empty block"
+      },
+      "nonce": 9109,
+      "difficulty": 3,
+      "hash": "000153a9792c0bce7b198badab9013899f7f4e27cc21017676b470d9250ebcf8"
+    }
+  ]
+}

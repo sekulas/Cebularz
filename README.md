@@ -25,7 +25,7 @@ npm run wallet -- verify-message mywallet.json <identityId> -m 'hello world' -s 
 # CLI Node Usage Examples
 Terminal 1:
 ```
-npm run node -- -p 4000
+npm run node -- -p 4000 -m
 ```
 Terminal 2:
 ```
