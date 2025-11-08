@@ -91,11 +91,28 @@ export class CebularzNode {
     this.app.post('/blocks/new', (req, res) => {
       const block: Block | undefined = req.body?.block;
       const sender: string | undefined = req.body?.sender;
-      console.log(`[node:${this.port}] received new block from ${sender || 'unknown'}`);
+      const previousPeersRaw: unknown = req.body?.previousPeers;
+      const previousPeers: string[] = Array.isArray(previousPeersRaw)
+          ? previousPeersRaw.filter(p => typeof p === 'string')
+          : [];
+      const myUrl = `http://localhost:${this.port}`;
+      const alreadyVisited = previousPeers.includes(myUrl);
+      console.log(`[node:${this.port}] received new block from ${sender || 'unknown'} prevPeersLen=${previousPeers.length} visited=${alreadyVisited}`);
+
       if (!block || typeof block !== 'object') {
         return res.status(400).json({ok: false, error: 'block required'});
       }
       const latest = this.getLatestBlock();
+      if (alreadyVisited) {
+        console.log(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
+        return res.json({
+          ok: true,
+          height: latest.height,
+          ignored: true,
+          reason: 'already visited'
+        });
+      }
+
       if (block.height <= latest.height) {
         // Stary lub równy – ignorujemy
         return res.json({ok: true, ignored: true, reason: 'height not newer'});
@@ -119,8 +136,12 @@ export class CebularzNode {
       }
       this.chain.push(block);
       console.log(`[node:${this.port}] accepted block height=${block.height} hash=${block.hash.slice(0, 16)}...`);
-      // propagacja dalej
-      this.broadcastBlock(block, sender).then();
+      // propagacja dalej jeśli nie byliśmy jeszcze na liście previousPeers
+      if (!alreadyVisited) {
+        this.broadcastBlock(block, sender, previousPeers).then();
+      } else {
+        console.log(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
+      }
       if (this.miner) this.requestMiningRestart();
       res.json({ok: true, height: block.height});
     });
@@ -187,17 +208,26 @@ export class CebularzNode {
     }
   }
 
-  private async broadcastBlock(block: Block, excludeSender?: string) {
+  private async broadcastBlock(block: Block, excludeSender?: string, previousPeers?: string[]) {
     const myUrl = `http://localhost:${this.port}`;
+    const chainPeers = Array.isArray(previousPeers) ? previousPeers.filter(p => typeof p === 'string') : [];
+
+    chainPeers.push(myUrl);
     for (const peer of this.peers) {
-      if (excludeSender && peer === excludeSender) continue; // unikaj pętli zwrotnej
+      if (excludeSender && peer === excludeSender) continue; // unikaj natychmiastowej pętli zwrotnej
+      if (chainPeers.includes(peer)) {
+        // Już byliśmy – zatrzymaj propagację
+        // if (this.log_ping)
+        console.log(`[node:${this.port}] broadcast loop prevention: peer ${peer} already in previousPeers; stopping`);
+        continue;
+      }
       try {
         await fetch(`${peer}/blocks/new`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({block, sender: myUrl})
+          body: JSON.stringify({block, sender: myUrl, previousPeers: chainPeers})
         });
-        console.log(`[node:${this.port}] broadcasted block height=${block.height} to ${peer}`);
+        console.log(`[node:${this.port}] broadcasted block height=${block.height} to ${peer} prevPeersLen=${chainPeers.length}`);
       } catch (e) {
         console.warn(`[node:${this.port}] broadcast to ${peer} failed:`, (e as Error).message);
       }
@@ -219,7 +249,7 @@ export class CebularzNode {
         } else {
           this.chain.push(block);
           console.log(`[node:${this.port}] mined block height=${block.height} hash=${block.hash.slice(0, 16)}... attempts=${msg.attempts} ms=${msg.ms}`);
-          this.broadcastBlock(block).then();
+          this.broadcastBlock(block, undefined, []).then();
         }
         this.miningInProgress = false;
         if (this.miningRestartPending) {
