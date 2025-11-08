@@ -5,19 +5,17 @@ import { startNode } from './node.js';
 const program = new Command();
 program
   .name('node')
-  .description('Cebularz Node CLI (Etap 1)')
-  .version('0.1.0');
+  .description('Cebularz Node CLI (PoW, ciągłe kopanie)')
+  .version('0.4.0');
 
 program
   .option('-p, --port <port>', 'listening port')
   .option('-b, --bootstrap <urls>', 'comma separated bootstrap peer URLs (http://localhost:4000,http://localhost:4001)')
+  .option('-m, --miner', 'enable miner mode')
+  .option('-d, --difficulty <n>', 'hex difficulty (leading zeroes)', '2')
   .action(opts => {
     const port = parseInt(opts.port, 10);
-    if (
-      isNaN(port) ||
-      port < 1 ||
-      port > 65535
-    ) {
+    if (isNaN(port) || port < 1 || port > 65535) {
       console.error('Error: Invalid port specified. Please provide a port number between 1 and 65535 using the -p or --port option.');
       process.exit(1);
     }
@@ -28,7 +26,13 @@ program
         .map((s: string) => s.trim())
         .filter((s: string) => s.length > 0);
     }
-    startNode(port, bootstrap);
+    const miner: boolean = !!opts.miner;
+    const difficulty = parseInt(opts.difficulty, 10);
+    if (isNaN(difficulty) || difficulty < 0 || difficulty > 8) {
+      console.error('Error: Invalid difficulty (0..8)');
+      process.exit(1);
+    }
+    startNode(port, bootstrap, miner, difficulty);
   });
 
 program.parseAsync(process.argv);
