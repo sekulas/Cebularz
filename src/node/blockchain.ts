@@ -80,7 +80,7 @@ export function isValidNewBlock(block: Block, prev: Block, expectedDifficulty?: 
   if (expected !== block.hash) return { ok: false, reason: 'hash mismatch' };
   if (!meetsDifficulty(block.hash, block.difficulty)) return { ok: false, reason: 'does not meet difficulty' };
   if (block.timestamp - Date.now() > 60_000) return { ok: false, reason: 'timestamp too far in future' };
-  if (block.timestamp < prev.timestamp - 60_000) return { ok: false, reason: 'timestamp too far in past' };
+  if (block.timestamp < prev.timestamp) return { ok: false, reason: 'timestamp earlier than previous block' };
   return { ok: true };
 }
 
