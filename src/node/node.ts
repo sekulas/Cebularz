@@ -95,14 +95,16 @@ export class CebularzNode {
       const previousPeers: string[] = Array.isArray(previousPeersRaw)
           ? previousPeersRaw.filter(p => typeof p === 'string')
           : [];
+      if (!block || typeof block !== 'object') {
+
+        return res.status(400).json({ok: false, error: 'block required'});
+      }
+      const latest = this.getLatestBlock();
+
       const myUrl = `http://localhost:${this.port}`;
       const alreadyVisited = previousPeers.includes(myUrl);
       console.log(`[node:${this.port}] received new block from ${sender || 'unknown'} prevPeersLen=${previousPeers.length} visited=${alreadyVisited}`);
 
-      if (!block || typeof block !== 'object') {
-        return res.status(400).json({ok: false, error: 'block required'});
-      }
-      const latest = this.getLatestBlock();
       if (alreadyVisited) {
         console.log(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
         return res.json({
@@ -115,6 +117,7 @@ export class CebularzNode {
 
       if (block.height <= latest.height) {
         // Stary lub równy – ignorujemy
+        console.log(`[node:${this.port}] received block has height ${block.height}, and latest is ${latest.height}. Ignoring!`);
         return res.json({ok: true, ignored: true, reason: 'height not newer'});
       }
       if (block.height !== latest.height + 1) {
@@ -210,14 +213,13 @@ export class CebularzNode {
 
   private async broadcastBlock(block: Block, excludeSender?: string, previousPeers?: string[]) {
     const myUrl = `http://localhost:${this.port}`;
-    const chainPeers = Array.isArray(previousPeers) ? previousPeers.filter(p => typeof p === 'string') : [];
+    const chainPeers = Array.isArray(previousPeers) ? previousPeers : [];
 
     chainPeers.push(myUrl);
     for (const peer of this.peers) {
       if (excludeSender && peer === excludeSender) continue; // unikaj natychmiastowej pętli zwrotnej
       if (chainPeers.includes(peer)) {
         // Już byliśmy – zatrzymaj propagację
-        // if (this.log_ping)
         console.log(`[node:${this.port}] broadcast loop prevention: peer ${peer} already in previousPeers; stopping`);
         continue;
       }
