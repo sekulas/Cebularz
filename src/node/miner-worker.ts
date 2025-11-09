@@ -6,7 +6,7 @@
 // cancelSAB: SharedArrayBuffer Int32[1]; jeśli Atomics.load(view,0) === 1 -> przerwij kopanie.
 
 import { parentPort } from 'node:worker_threads';
-import { hashBlockPayload, type Block } from './blockchain.ts';
+import {hashBlockPayload, type Block, BlockData} from './blockchain.ts';
 
 interface MinePayload {
   prevHash: string;
@@ -37,7 +37,7 @@ function mineBlock(payload: MinePayload, cancelView?: Int32Array): { block?: Blo
   // Konstruujemy stałe pola kandydata bloku (timestamp zamrożony na start kopania)
   const height = prevHeight + 1;
   const timestamp = Date.now();
-  const data = { miner, transactions };
+  const data :BlockData = { miner, transactions };
   const prevHashFixed = prevHash;
 
   let nonce = 0;
