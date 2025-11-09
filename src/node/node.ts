@@ -214,7 +214,7 @@ export class CebularzNode {
 
   private async broadcastBlock(block: Block, excludeSender?: string, previousPeers?: string[]) {
     const myUrl = `http://localhost:${this.port}`;
-    const chainPeers = Array.isArray(previousPeers) ? previousPeers : [];
+    const chainPeers = Array.isArray(previousPeers) ? [...previousPeers] : [];
 
     chainPeers.push(myUrl);
     for (const peer of this.peers) {
