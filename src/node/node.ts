@@ -2,6 +2,7 @@ import express from 'express';
 import {PING_INTERVAL_MS} from './const.js';
 import {Block, createGenesisBlock, isValidNewBlock, validateChain} from './blockchain.js';
 import {Worker} from 'node:worker_threads';
+import log from "loglevel";
 
 export interface NodeConfig {
   port: number;
@@ -18,7 +19,6 @@ export class CebularzNode {
   private bootstrap: string[] = [];
   private miner: boolean = false;
   private difficulty: number = 2;
-  private log_ping?: boolean = false;
 
 
   private chain: Block[] = [];
@@ -55,7 +55,7 @@ export class CebularzNode {
       }
       const requester = url;
       const responder = `http://localhost:${this.port}`;
-      console.log(`[node:${this.port}] registering peer ${requester}`);
+      log.info(`[node:${this.port}] registering peer ${requester}`);
       this.peers.add(requester);
       res.json({ok: true, requester, responder, peers: [...this.peers]});
     });
@@ -63,8 +63,7 @@ export class CebularzNode {
     // Ping
     this.app.get('/ping', (req, res) => {
       const from = (req.query.from as string) || 'unknown';
-      if (this.log_ping)
-        console.log(`[node:${this.port}] responding to ping from ${from}`);
+      log.trace(`[node:${this.port}] responding to ping from ${from}`);
       res.json({ok: true, pong: true});
     });
 
@@ -103,10 +102,11 @@ export class CebularzNode {
 
       const myUrl = `http://localhost:${this.port}`;
       const alreadyVisited = previousPeers.includes(myUrl);
-      console.log(`[node:${this.port}] received new block from ${sender || 'unknown'} prevPeersLen=${previousPeers.length} visited=${alreadyVisited}`);
+      log.debug(`[node:${this.port}] received new block from ${sender || 'unknown'}`);
+      log.debug(`[node:${this.port}] ...prevPeersLen=${previousPeers.length} visited=${alreadyVisited}`);
 
       if (alreadyVisited) {
-        console.log(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
+        log.debug(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
         return res.json({
           ok: true,
           height: latest.height,
@@ -117,14 +117,14 @@ export class CebularzNode {
 
       if (block.height <= latest.height) {
         // Stary lub równy – ignorujemy
-        console.log(`[node:${this.port}] received block has height ${block.height}, and latest is ${latest.height}. Ignoring!`);
+        log.debug(`[node:${this.port}] received block has height ${block.height}, and latest is ${latest.height}. Ignoring!`);
         return res.json({ok: true, ignored: true, reason: 'height not newer'});
       }
       if (block.height !== latest.height + 1) {
         // Luka – spróbuj zsynchronizować pełen łańcuch od nadawcy
         if (sender) {
-          console.log(`[node:${this.port}] gap detected (latest=${latest.height}, incoming=${block.height}) -> triggering full sync from ${sender}`);
-          this.syncFromPeer(sender).catch(e => console.warn(`[node:${this.port}] full sync error:`, (e as Error).message));
+          log.warn(`[node:${this.port}] gap detected (latest=${latest.height}, incoming=${block.height}) -> triggering full sync from ${sender}`);
+          this.syncFromPeer(sender).catch(e => log.error(`[node:${this.port}] full sync error:`, (e as Error).message));
         }
         return res.status(202).json({
           ok: false,
@@ -138,12 +138,12 @@ export class CebularzNode {
         return res.status(400).json({ok: false, error: v.reason});
       }
       this.chain.push(block);
-      console.log(`[node:${this.port}] accepted block height=${block.height} hash=${block.hash.slice(0, 16)}...`);
+      log.info(`[node:${this.port}] accepted block height=${block.height} hash=${block.hash.slice(0, 16)} from ${sender || 'unknown'}...`);
       // propagacja dalej jeśli nie byliśmy jeszcze na liście previousPeers
       if (!alreadyVisited) {
         this.broadcastBlock(block, sender, previousPeers).then();
       } else {
-        console.log(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
+        log.debug(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
       }
       if (this.miner) this.requestMiningRestart();
       res.json({ok: true, height: block.height});
@@ -159,7 +159,7 @@ export class CebularzNode {
   private async registerAt(peerUrl: string) {
     try {
       const myUrl = `http://localhost:${this.port}`;
-      console.log(`[node:${this.port}] sending request to ${peerUrl} to register`);
+      log.debug(`[node:${this.port}] sending request to ${peerUrl} to register`);
       const resp = await fetch(`${peerUrl}/register`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -182,12 +182,12 @@ export class CebularzNode {
       this.peers.add(peerUrl);
 
       const responder = data.responder || peerUrl;
-      console.log(`[node:${this.port}] register request accepted by ${responder}`);
+      log.debug(`[node:${this.port}] register request accepted by ${responder}`);
 
       // Po rejestracji spróbuj zsynchronizować łańcuch (jeśli peer ma dłuższy)
       await this.syncFromPeer(peerUrl);
     } catch (e) {
-      console.error(`[node:${this.port}] Failed registering at ${peerUrl}:`, (e as Error).message);
+      log.error(`[node:${this.port}] Failed registering at ${peerUrl}:`, (e as Error).message);
     }
   }
 
@@ -201,13 +201,13 @@ export class CebularzNode {
       if (!v.ok) throw new Error(`remote chain invalid: ${v.reason}`);
       if (data.chain.length > this.chain.length) {
         this.chain = data.chain;
-        console.log(`[node:${this.port}] chain synced from ${peerUrl} height=${this.getLatestBlock().height}`);
+        log.info(`[node:${this.port}] chain synced from ${peerUrl} height=${this.getLatestBlock().height}`);
         if (this.miner) this.requestMiningRestart();
       } else {
-        console.log(`[node:${this.port}] remote chain not longer (local=${this.chain.length}, remote=${data.chain.length})`);
+        log.info(`[node:${this.port}] remote chain not longer (local=${this.chain.length}, remote=${data.chain.length})`);
       }
     } catch (e) {
-      console.warn(`[node:${this.port}] syncFromPeer failed ${peerUrl}:`, (e as Error).message);
+      log.error(`[node:${this.port}] syncFromPeer failed ${peerUrl}:`, (e as Error).message);
     }
   }
 
@@ -220,7 +220,7 @@ export class CebularzNode {
       if (excludeSender && peer === excludeSender) continue; // unikaj natychmiastowej pętli zwrotnej
       if (chainPeers.includes(peer)) {
         // Już byliśmy – zatrzymaj propagację
-        console.log(`[node:${this.port}] broadcast loop prevention: peer ${peer} already in previousPeers; stopping`);
+        log.debug(`[node:${this.port}] broadcast loop prevention: peer ${peer} already in previousPeers; stopping`);
         continue;
       }
       try {
@@ -229,9 +229,9 @@ export class CebularzNode {
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({block, sender: myUrl, previousPeers: chainPeers})
         });
-        console.log(`[node:${this.port}] broadcasted block height=${block.height} to ${peer} prevPeersLen=${chainPeers.length}`);
+        log.debug(`[node:${this.port}] broadcasted block height=${block.height} to ${peer} prevPeersLen=${chainPeers.length}`);
       } catch (e) {
-        console.warn(`[node:${this.port}] broadcast to ${peer} failed:`, (e as Error).message);
+        log.error(`[node:${this.port}] broadcast to ${peer} failed:`, (e as Error).message);
       }
     }
   }
@@ -247,10 +247,10 @@ export class CebularzNode {
         const latest = this.getLatestBlock();
         const v = isValidNewBlock(block, latest, this.difficulty);
         if (!v.ok) {
-          console.warn(`[node:${this.port}] mined block invalid: ${v.reason}`);
+          log.warn(`[node:${this.port}] mined block invalid: ${v.reason}`);
         } else {
           this.chain.push(block);
-          console.log(`[node:${this.port}] mined block height=${block.height} hash=${block.hash.slice(0, 16)}... attempts=${msg.attempts} ms=${msg.ms}`);
+          log.info(`[node:${this.port}] mined block height=${block.height} hash=${block.hash.slice(0, 16)}... attempts=${msg.attempts} ms=${msg.ms}`);
           this.broadcastBlock(block, undefined, []).then();
         }
         this.miningInProgress = false;
@@ -261,20 +261,20 @@ export class CebularzNode {
           this.startMiningJob();
         }
       } else if (msg && msg.canceled) {
-        console.log(`[node:${this.port}] mining job canceled (attempts=${msg.attempts} ms=${msg.ms})`);
+        log.info(`[node:${this.port}] mining job canceled (attempts=${msg.attempts} ms=${msg.ms})`);
         this.miningInProgress = false;
         if (this.miningRestartPending) {
           this.miningRestartPending = false;
           this.startMiningJob();
         }
       } else if (msg && msg.ok === false) {
-        console.error(`[node:${this.port}] mining worker error: ${msg.error}`);
+        log.error(`[node:${this.port}] mining worker error: ${msg.error}`);
         this.miningInProgress = false;
         setTimeout(() => this.startMiningJob(), 1000);
       }
     });
     this.miningWorker.on('error', err => {
-      console.error(`[node:${this.port}] mining worker crashed:`, err);
+      log.error(`[node:${this.port}] mining worker crashed:`, err);
       this.miningWorker = null;
       this.miningInProgress = false;
       setTimeout(() => {
@@ -283,7 +283,7 @@ export class CebularzNode {
       }, 1000);
     });
     this.miningWorker.on('exit', code => {
-      console.warn(`[node:${this.port}] mining worker exited code=${code}`);
+      log.warn(`[node:${this.port}] mining worker exited code=${code}`);
       this.miningWorker = null;
       this.miningInProgress = false;
       if (this.miner) setTimeout(() => {
@@ -310,9 +310,9 @@ export class CebularzNode {
     try {
       this.miningWorker!.postMessage({cmd: 'mine', payload, cancelSAB: this.cancelSAB});
       this.miningInProgress = true;
-      console.log(`[node:${this.port}] mining job started (prevHeight=${latest.height}, difficulty=${this.difficulty})`);
+      log.debug(`[node:${this.port}] mining job started (prevHeight=${latest.height}, difficulty=${this.difficulty})`);
     } catch (e) {
-      console.error(`[node:${this.port}] failed to start mining job:`, (e as Error).message);
+      log.error(`[node:${this.port}] failed to start mining job:`, (e as Error).message);
       this.miningInProgress = false;
     }
   }
@@ -322,7 +322,7 @@ export class CebularzNode {
     if (this.miningInProgress && this.cancelSAB) {
       Atomics.store(new Int32Array(this.cancelSAB), 0, 1);
       this.miningRestartPending = true;
-      console.log(`[node:${this.port}] requested mining restart`);
+      log.debug(`[node:${this.port}] requested mining restart`);
     } else if (!this.miningInProgress) {
       this.startMiningJob();
     }
@@ -330,7 +330,7 @@ export class CebularzNode {
 
   start() {
     this.app.listen(this.port, () => {
-      console.log(`[node:${this.port}] listening`);
+      log.info(`[node:${this.port}] listening`);
 
       if (this.bootstrap.length) {
         for (const peer of this.bootstrap) {
@@ -342,7 +342,7 @@ export class CebularzNode {
       this.pingTimer = setInterval(() => this.pingPeers(), PING_INTERVAL_MS);
 
       if (this.miner) {
-        console.log(`[node:${this.port}] miner enabled (difficulty=${this.difficulty})`);
+        log.debug(`[node:${this.port}] miner enabled (difficulty=${this.difficulty})`);
         this.initMiningWorker();
         this.startMiningJob();
       }
@@ -358,16 +358,14 @@ export class CebularzNode {
       } catch {
         peerPort = NaN;
       }
-      if (this.log_ping)
-        console.log(`[node:${this.port}] ping -> ${peerPort}`);
+      log.trace(`[node:${this.port}] ping -> ${peerPort}`);
       try {
         const resp = await fetch(`${url}/ping?from=${this.port}`);
         if (resp.ok) {
-          if (this.log_ping)
-            console.log(`[node:${this.port}] pong <- ${peerPort}`);
+          log.trace(`[node:${this.port}] pong <- ${peerPort}`);
         }
       } catch (e) {
-        console.warn(`[node:${this.port}] ping fail ${peerPort}: ${(e as Error).message}`);
+        log.warn(`[node:${this.port}] ping fail ${peerPort}: ${(e as Error).message}`);
       }
     }
   }
