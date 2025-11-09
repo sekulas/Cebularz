@@ -13,6 +13,7 @@ interface MinePayload {
   prevHeight: number;
   miner: string; // identyfikator/url węzła kopiącego
   difficulty: number; // liczba wiodących zer hex
+  transactions: []; //dodać typ jak zaimpleemntujemy transackje
 }
 
 interface MineCmd {
@@ -29,14 +30,14 @@ function meetsDifficulty(hash: string, difficulty: number): boolean {
 
 function mineBlock(payload: MinePayload, cancelView?: Int32Array): { block?: Block; attempts: number; ms: number; canceled?: boolean; error?: string } {
   const start = Date.now();
-  const { prevHash, prevHeight, miner, difficulty } = payload;
+  const { prevHash, prevHeight, miner, transactions, difficulty } = payload;
   if (!prevHash || prevHash.length !== 64) return { attempts: 0, ms: 0, error: 'Invalid prevHash' };
   if (difficulty < 0 || difficulty > 64) return { attempts: 0, ms: 0, error: 'Invalid difficulty' };
 
   // Konstruujemy stałe pola kandydata bloku (timestamp zamrożony na start kopania)
   const height = prevHeight + 1;
   const timestamp = Date.now();
-  const data = { miner, transactions: [] as any[] };
+  const data = { miner, transactions };
   const prevHashFixed = prevHash;
 
   let nonce = 0;
