@@ -199,6 +199,7 @@ export class CebularzNode {
       if (!data.chain || !Array.isArray(data.chain)) throw new Error('no chain');
       const v = validateChain(data.chain, this.difficulty);
       if (!v.ok) throw new Error(`remote chain invalid: ${v.reason}`);
+      // FIXME: change in future - comparison based on accumulated difficulty, but not length
       if (data.chain.length > this.chain.length) {
         this.chain = data.chain;
         log.info(`[node:${this.port}] chain synced from ${peerUrl} height=${this.getLatestBlock().height}`);
