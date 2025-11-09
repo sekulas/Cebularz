@@ -13,7 +13,7 @@ interface MinePayload {
   prevHeight: number;
   miner: string; // identyfikator/url węzła kopiącego
   difficulty: number; // liczba wiodących zer hex
-  transactions: []; //dodać typ jak zaimpleemntujemy transackje
+  transactions: []; //dodać typ jak zaimplementujemy transakcje
 }
 
 interface MineCmd {
