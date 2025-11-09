@@ -52,26 +52,6 @@ export function createGenesisBlock(): Block {
   return { ...payload, hash };
 }
 
-export function createNextBlock(prev: Block, miner: string, transactions: any[] = [], difficulty: number = 2): Block {
-  const base = {
-    height: prev.height + 1,
-    timestamp: Date.now(),
-    prevHash: prev.hash,
-    data: { miner, transactions },
-    difficulty
-  } as const;
-  let nonce = 0;
-  // Szukaj nonce spełniającego target
-  while (true) {
-    const payload: Omit<Block, 'hash'> = { ...base, nonce } as any;
-    const hash = hashBlockPayload(payload);
-    if (meetsDifficulty(hash, difficulty)) {
-      return { ...payload, hash } as Block;
-    }
-    nonce++;
-  }
-}
-
 export function isValidNewBlock(block: Block, prev: Block, expectedDifficulty?: number): { ok: true } | { ok: false; reason: string } {
   if (block.height !== prev.height + 1) return { ok: false, reason: `height mismatch (expected ${prev.height + 1}, got ${block.height})` };
   if (block.prevHash !== prev.hash) return { ok: false, reason: 'prevHash mismatch' };

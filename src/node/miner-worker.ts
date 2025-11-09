@@ -6,7 +6,7 @@
 // cancelSAB: SharedArrayBuffer Int32[1]; jeśli Atomics.load(view,0) === 1 -> przerwij kopanie.
 
 import { parentPort } from 'node:worker_threads';
-import {hashBlockPayload, type Block, BlockData} from './blockchain.ts';
+import {hashBlockPayload, type Block, type BlockData} from './blockchain.ts';
 
 interface MinePayload {
   prevHash: string;
