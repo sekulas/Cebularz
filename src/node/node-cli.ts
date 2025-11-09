@@ -31,8 +31,8 @@ program
     }
     const miner: boolean = !!opts.miner;
     const difficulty = parseInt(opts.difficulty, 10);
-    if (isNaN(difficulty) || difficulty < 0 || difficulty > 8) {
-      log.error('Error: Invalid difficulty (0..8)');
+    if (isNaN(difficulty) || difficulty < 0 || difficulty > 64) {
+      log.error('Error: Invalid difficulty (0..64)');
       process.exit(1);
     }
     startNode(port, bootstrap, miner, difficulty);
