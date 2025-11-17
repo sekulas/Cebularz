@@ -1,5 +1,6 @@
 import { PING_INTERVAL_MS } from './const.js';
 import { startNode } from './node.js';
+import log from "loglevel";
 
 async function main() {
   startNode(4300);
@@ -7,9 +8,9 @@ async function main() {
   await new Promise(r => setTimeout(r, 1200));
   const peersA = await fetch('http://localhost:4300/peers').then(r => r.json());
   const peersB = await fetch('http://localhost:4301/peers').then(r => r.json());
-  console.log('peers[4300]', peersA);
-  console.log('peers[4301]', peersB);
-  console.log('Waiting to observe ping/pong logs...');
+  log.info('peers[4300]', peersA);
+  log.info('peers[4301]', peersB);
+  log.info('Waiting to observe ping/pong logs...');
   await new Promise(r => setTimeout(r, PING_INTERVAL_MS + 1000));
   process.exit(0);
 }

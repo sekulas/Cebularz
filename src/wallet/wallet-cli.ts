@@ -4,6 +4,8 @@ import inquirer from 'inquirer';
 import { Wallet } from './wallet.js';
 import { BASE64 } from './const.js';
 import { assertStrongPassword, estimatePasswordStrength } from './password-strength.js';
+import log from "loglevel";
+
 
 const program = new Command();
 program
@@ -16,7 +18,7 @@ program
   .argument('<file>', 'wallet file path')
   .action(async (file) => {
     if (await Wallet.exists(file)) {
-      console.error('File already exists.');
+      log.error('File already exists.');
       process.exit(1);
     }
     const { masterPassword } = await inquirer.prompt([
@@ -26,21 +28,21 @@ program
     try {
       assertStrongPassword(masterPassword);
     } catch (e) {
-      console.error((e as Error).message);
-      console.error('Warning: Chosen master password is weak.');
+      log.error((e as Error).message);
+      log.error('Warning: Chosen master password is weak.');
       const { cont } = await inquirer.prompt([
         { type: 'confirm', name: 'cont', message: 'Continue anyway with weak password?', default: false }
       ]);
       if (!cont) {
-        console.log('Aborted. Wallet not created.');
+        log.info('Aborted. Wallet not created.');
         process.exit(2);
       }
     }
     const wallet = await Wallet.create(file);
     wallet.initializeMaster(masterPassword);
     await wallet.save();
-    console.log('Wallet created:', file);
-    console.log(`Master password entropy≈${strength.entropyBits} bits`);
+    log.info('Wallet created:', file);
+    log.info(`Master password entropy≈${strength.entropyBits} bits`);
   });
 
 program
@@ -55,9 +57,9 @@ program
     try {
       const id = wallet.addIdentity(opts.label, masterPassword).id;
       await wallet.save();
-      console.log('Added identity id=', id);
+      log.info('Added identity id=', id);
     } catch (e) {
-      console.error('Failed to add identity:', (e as Error).message);
+      log.error('Failed to add identity:', (e as Error).message);
       process.exit(1);
     }
   });
@@ -68,7 +70,7 @@ program
   .action(async (file) => {
     const wallet = await Wallet.open(file);
     wallet.listIdentities().forEach(i => {
-      console.log(`${i.id}  ${i.label}`);
+      log.info(`${i.id}  ${i.label}`);
     });
   });
 
@@ -84,9 +86,9 @@ program
     ]);
     try {
       const signatureB64 = wallet.signMessage(id, masterPassword, opts.message);
-      console.log(`signature(${BASE64})=`, signatureB64);
+      log.info(`signature(${BASE64})=`, signatureB64);
     } catch (e) {
-      console.error('Signing failed:', (e as Error).message);
+      log.error('Signing failed:', (e as Error).message);
       process.exit(1);
     }
   });
@@ -101,10 +103,10 @@ program
     const wallet = await Wallet.open(file);
     try {
       const ok = wallet.verifyMessage(id, opts.message, opts.signature);
-      console.log(ok ? 'VALID' : 'INVALID');
+      log.info(ok ? 'VALID' : 'INVALID');
       process.exit(ok ? 0 : 2);
     } catch (e) {
-      console.error('Verification failed:', (e as Error).message);
+      log.error('Verification failed:', (e as Error).message);
       process.exit(1);
     }
   });
