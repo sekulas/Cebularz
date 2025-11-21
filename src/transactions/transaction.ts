@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { BASE64, HASH_ID_ALGO } from "../wallet/const.js";
+import { BASE64, HASH_ID_ALGO, HEX } from "../wallet/const.js";
 import { createPrivateKey, sign as edSign, verify as edVerify } from 'crypto';
 
 export class TxIn {
@@ -69,13 +69,58 @@ const signTxIn = (transaction: Transaction, txInIndex: number, privateKey: strin
     if (!txIn) {
         throw new Error('TxIn not found at index ' + txInIndex);
     }
-    
-    const dataToSign: string = transaction.id;
 
-    const referencedUnspentTxOut: UnspentTxOut = findUnspentTxOut(txIn.txOutId, txIn.txOutIndex, aUnspentTxOuts);
-    const referencedAddress: string = referencedUnspentTxOut.address;
+    const referencedUnspentTxOut: UnspentTxOut | undefined = findUnspentTxOut(txIn.txOutId, txIn.txOutIndex, aUnspentTxOuts);
+    if (!referencedUnspentTxOut) throw new Error('Referenced UTXO not found');
 
+    const derivedAddress = createHash(HASH_ID_ALGO).update(txIn.publicKey).digest(HEX);
+    if (derivedAddress !== referencedUnspentTxOut.address) throw new Error('Public key does not match UTXO owner');
+
+    const msg = Buffer.from(transaction.id);
     const keyObj = createPrivateKey(privateKey);
-    const signature: string = edSign(null, Buffer.from(dataToSign), keyObj).toString(BASE64);
-    return signature;
+    return edSign(null, msg, keyObj).toString(BASE64);
 }
+
+const findUnspentTxOut = (transactionId: string, index: number, aUnspentTxOuts: UnspentTxOut[]): UnspentTxOut | undefined => {
+    return aUnspentTxOuts.find((uTxO) => uTxO.txOutId === transactionId && uTxO.txOutIndex === index);
+}  
+
+
+const updateUnspentTxOuts = (newTransactions: Transaction[], current: UnspentTxOut[]): UnspentTxOut[] => {
+    const consumedKeys = new Set<string>();
+    for (const tx of newTransactions) {
+        for (const i of tx.txIns) {
+            consumedKeys.add(`${i.txOutId}:${i.txOutIndex}`);
+        }
+    }
+    
+    const created: UnspentTxOut[] = [];
+    for (const tx of newTransactions) {
+        tx.txOuts.forEach((o, idx) => {
+            created.push(new UnspentTxOut(tx.id, idx, o.address, o.amount));
+        });
+    }
+
+  const result = current.filter(u => !consumedKeys.has(`${u.txOutId}:${u.txOutIndex}`));
+  return result.concat(created);
+}
+
+export const isValidTransactionStructure = (raw: unknown): raw is Transaction => {
+  if (!raw || typeof raw !== 'object') return false;
+  const t = raw as any;
+  if (typeof t.id !== 'string') return false;
+  if (!Array.isArray(t.txIns) || !Array.isArray(t.txOuts)) return false;
+  if (!t.txIns.every((i: any) =>
+    i && typeof i.txOutId === 'string' &&
+    typeof i.txOutIndex === 'number' &&
+    typeof i.signature === 'string' &&
+    typeof i.publicKey === 'string'
+  )) return false;
+  if (!t.txOuts.every((o: any) =>
+    o && typeof o.address === 'string' &&
+    typeof o.amount === 'number' &&
+    Number.isFinite(o.amount) &&
+    o.amount >= 0
+  )) return false;
+  return true;
+};
