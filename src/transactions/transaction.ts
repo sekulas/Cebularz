@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { BASE64, HASH_ID_ALGO, HEX } from "../wallet/const.js";
-import { createPrivateKey, sign as edSign, verify as edVerify } from 'crypto';
+import { createPrivateKey, createPublicKey, sign as edSign, verify as edVerify } from 'crypto';
 
 export class TxIn {
     public txOutId: string;
@@ -52,7 +52,7 @@ export class UnspentTxOut {
     }
 }
 
-const getTransactionId = (transaction: Transaction): string => {
+export const getTransactionId = (transaction: Transaction): string => {
     const txInContent: string = transaction.txIns
         .map((txIn) => txIn.txOutId + txIn.txOutIndex)
         .reduce((acc, val) => acc + val, '');
@@ -61,10 +61,10 @@ const getTransactionId = (transaction: Transaction): string => {
         .map((txOut) => txOut.address + txOut.amount)
         .reduce((acc, val) => acc + val, '');
 
-    return createHash(HASH_ID_ALGO).update(txInContent + txOutContent).digest('hex');
+    return createHash(HASH_ID_ALGO).update(txInContent + txOutContent).digest(HEX);
 }
 
-const signTxIn = (transaction: Transaction, txInIndex: number, privateKey: string, aUnspentTxOuts: UnspentTxOut[]): string => {
+export const signTxIn = (transaction: Transaction, txInIndex: number, privateKey: string, aUnspentTxOuts: UnspentTxOut[]): string => {
     const txIn: TxIn | undefined = transaction.txIns[txInIndex];
     if (!txIn) {
         throw new Error('TxIn not found at index ' + txInIndex);
@@ -81,12 +81,12 @@ const signTxIn = (transaction: Transaction, txInIndex: number, privateKey: strin
     return edSign(null, msg, keyObj).toString(BASE64);
 }
 
-const findUnspentTxOut = (transactionId: string, index: number, aUnspentTxOuts: UnspentTxOut[]): UnspentTxOut | undefined => {
+export const findUnspentTxOut = (transactionId: string, index: number, aUnspentTxOuts: UnspentTxOut[]): UnspentTxOut | undefined => {
     return aUnspentTxOuts.find((uTxO) => uTxO.txOutId === transactionId && uTxO.txOutIndex === index);
 }  
 
 
-const updateUnspentTxOuts = (newTransactions: Transaction[], current: UnspentTxOut[]): UnspentTxOut[] => {
+export const updateUnspentTxOuts = (newTransactions: Transaction[], current: UnspentTxOut[]): UnspentTxOut[] => {
     const consumedKeys = new Set<string>();
     for (const tx of newTransactions) {
         for (const i of tx.txIns) {
@@ -123,4 +123,67 @@ export const isValidTransactionStructure = (raw: unknown): raw is Transaction =>
     o.amount >= 0
   )) return false;
   return true;
+};
+
+export const validateTransaction = (transaction: Transaction, aUnspentTxOuts: UnspentTxOut[]): boolean => {
+    if (getTransactionId(transaction) !== transaction.id) {
+        console.log('invalid tx id: ' + transaction.id);
+        return false;
+    }
+
+    const hasValidTxIns: boolean = transaction.txIns
+        .map((txIn) => validateTxIn(txIn, transaction, aUnspentTxOuts))
+        .reduce((a, b) => a && b, true);
+
+    if (!hasValidTxIns) {
+        console.log('some of the txIns are invalid in tx: ' + transaction.id);
+        return false;
+    }
+
+    const totalTxInValues: number = transaction.txIns
+        .map((txIn) => getTxInAmount(txIn, aUnspentTxOuts))
+        .reduce((acc, val) => (acc + val), 0);
+        
+    const totalTxOutValues: number = transaction.txOuts
+        .map((txOut) => txOut.amount)
+        .reduce((acc, val) => (acc + val), 0);
+
+    if (totalTxOutValues !== totalTxInValues) {
+        console.log('totalTxOutValues !== totalTxInValues in tx: ' + transaction.id);
+        return false;
+    }
+
+    return true;
+};
+
+export const validateTxIn = (txIn: TxIn, transaction: Transaction, aUnspentTxOuts: UnspentTxOut[]): boolean => {
+    const referencedUTxOut: UnspentTxOut | undefined =
+        aUnspentTxOuts.find((uTxO) => uTxO.txOutId === txIn.txOutId);
+
+    if (referencedUTxOut == undefined) {
+        console.log('referenced txOut not found: ' + JSON.stringify(txIn));
+        return false;
+    }
+    
+    const address = referencedUTxOut.address;
+    const derivedAddress = createHash(HASH_ID_ALGO).update(txIn.publicKey).digest(HEX);
+    
+    if (derivedAddress !== address) {
+        console.log('public key does not match address');
+        return false;
+    }
+
+    const msg = Buffer.from(transaction.id);
+    const signature = Buffer.from(txIn.signature, BASE64);
+    const publicKey = createPublicKey(txIn.publicKey);
+    
+    return edVerify(null, msg, publicKey, signature);
+};
+
+export const getTxInAmount = (txIn: TxIn, aUnspentTxOuts: UnspentTxOut[]): number => {
+    const utxo = findUnspentTxOut(txIn.txOutId, txIn.txOutIndex, aUnspentTxOuts);
+    if (!utxo) {
+        throw new Error('Referenced UTXO not found');
+    }
+    return utxo.amount;
 };
