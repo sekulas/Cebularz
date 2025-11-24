@@ -3,12 +3,15 @@ import {PING_INTERVAL_MS} from './const.js';
 import {Block, createGenesisBlock, isValidNewBlock, validateChain} from './blockchain.js';
 import {Worker} from 'node:worker_threads';
 import log from "loglevel";
+import { getCoinbaseTransaction } from '../transactions/coinbase.ts';
+import { processTransactions, Transaction, UnspentTxOut, validateTransaction } from '../transactions/transaction.ts';
 
 export interface NodeConfig {
   port: number;
   bootstrap?: string[];
   miner?: boolean; // czy ten węzeł kopie bloki
   difficulty?: number; // ilość wiodących zer w hash (hex)
+  miningAddress: string; // adres do nagrody za kopanie
 }
 
 export class CebularzNode {
@@ -19,7 +22,7 @@ export class CebularzNode {
   private bootstrap: string[] = [];
   private miner: boolean = false;
   private difficulty: number = 2;
-
+  private miningAddress: string;
 
   private chain: Block[] = [];
 
@@ -29,11 +32,16 @@ export class CebularzNode {
   private miningInProgress = false;
   private miningRestartPending = false;
 
+  private unspentTxOuts: UnspentTxOut[] = [];
+  private transactionPool: Transaction[] = [];
+
+
   constructor(cfg: NodeConfig) {
     this.port = cfg.port;
     this.bootstrap = cfg.bootstrap ?? [];
     this.miner = !!cfg.miner;
     if (typeof cfg.difficulty === 'number' && cfg.difficulty >= 0 && cfg.difficulty <= 64) this.difficulty = cfg.difficulty;
+    this.miningAddress = cfg.miningAddress
     this.setupRoutes();
     this.initializeChain();
   }
@@ -148,7 +156,75 @@ export class CebularzNode {
       if (this.miner) this.requestMiningRestart();
       res.json({ok: true, height: block.height});
     });
+
+    this.app.post('/transactions', (req, res) => {
+      const tx: Transaction | undefined = req.body?.transaction;
+      if (!tx || typeof tx !== 'object') {
+        return res.status(400).json({error: 'transaction required'});
+      }
+      this.addToTransactionPool(tx);
+      res.send({ok: true, txId: tx.id})
+    })
+
+    this.app.get('/unspent/:address', (req, res) => {
+      const address = req.params.address;
+      const myUnspent = this.unspentTxOuts.filter(u => u.address === address);
+      res.json({address, unspentTxOuts: myUnspent});
+    })
+
+    this.app.get('/balance/:address', (req, res) => {
+      const address = req.params.address;
+      const myUnspent = this.unspentTxOuts.filter(u => u.address === address);
+      const balance = myUnspent.reduce((a, b) => a + b.amount, 0);
+      res.json({address, balance});
+    });
   }
+
+  private addToTransactionPool(tx: Transaction) {
+    if (!validateTransaction(tx, this.unspentTxOuts)) {
+        log.warn(`Trying to add invalid tx to pool: ${tx.id}`);
+        return;
+    }
+    if (this.transactionPool.find(t => t.id === tx.id)) return;
+    
+    log.info(`Added tx to pool: ${tx.id}`);
+    this.transactionPool.push(tx);
+  }
+
+  private updateTransactionPool(minedTxs: Transaction[]) {
+    const minedIds = new Set(minedTxs.map(t => t.id));
+    this.transactionPool = this.transactionPool.filter(t => !minedIds.has(t.id));
+  }
+
+  private handleReceivedBlock(block: Block) {
+    const latest = this.getLatestBlock();
+    if (block.height <= latest.height) return; // Stary blok
+
+    const result = this.processBlock(block, latest, this.unspentTxOuts, this.difficulty);
+    if (result.ok && result.newTxOs) {
+        this.chain.push(block);
+        this.unspentTxOuts = result.newTxOs;
+
+        // Remove mined transactions from pool
+        this.updateTransactionPool(block.data.transactions);
+        log.info(`Block accepted height=${block.height}. UTXO set size: ${this.unspentTxOuts.length}`);
+        if (this.miner) this.requestMiningRestart();
+    } else {
+        log.warn(`Block rejected: ${result.reason}`);
+    }
+  }
+
+  private processBlock = (block: Block, prevBlock: Block, unspentTxOuts: UnspentTxOut[], difficulty: number): { ok: boolean, newTxOs?: UnspentTxOut[], reason?: string } => {
+    const basicValidation = isValidNewBlock(block, prevBlock, difficulty);
+    if (!basicValidation) return { ok: false, reason: 'invalid structure' };
+
+    const newUTxOs = processTransactions(block.data.transactions, unspentTxOuts, block.height);
+    if (newUTxOs === null) {
+        return { ok: false, reason: 'invalid transactions in block' };
+    }
+
+    return { ok: true, newTxOs: newUTxOs };
+};
 
   private getLatestBlock(): Block {
     const latest = this.chain[this.chain.length - 1];
@@ -245,15 +321,12 @@ export class CebularzNode {
     this.miningWorker.on('message', (msg: any) => {
       if (msg && msg.ok && msg.block) {
         const block: Block = msg.block;
-        const latest = this.getLatestBlock();
-        const v = isValidNewBlock(block, latest, this.difficulty);
-        if (!v.ok) {
-          log.warn(`[node:${this.port}] mined block invalid: ${v.reason}`);
-        } else {
-          this.chain.push(block);
-          log.info(`[node:${this.port}] mined block height=${block.height} hash=${block.hash.slice(0, 16)}... attempts=${msg.attempts} ms=${msg.ms}`);
-          this.broadcastBlock(block, undefined, []).then();
-        }
+
+        this.handleReceivedBlock(block);
+
+        log.info(`[node:${this.port}] mined block height=${block.height} hash=${block.hash.slice(0, 16)}... attempts=${msg.attempts} ms=${msg.ms}`);
+        this.broadcastBlock(block, undefined, []).then();
+        
         this.miningInProgress = false;
         if (this.miningRestartPending) {
           this.miningRestartPending = false;
@@ -299,6 +372,10 @@ export class CebularzNode {
     if (!this.miningWorker) this.initMiningWorker();
     if (this.miningInProgress) return;
     const latest = this.getLatestBlock();
+
+    const coinbaseTx = getCoinbaseTransaction(this.miningAddress, latest.height + 1);
+    const txsToMine = [coinbaseTx, ...this.transactionPool.slice(0, 2)]
+
     this.cancelSAB = new SharedArrayBuffer(4);
     const view = new Int32Array(this.cancelSAB);
     Atomics.store(view, 0, 0);
@@ -306,6 +383,7 @@ export class CebularzNode {
       prevHash: latest.hash,
       prevHeight: latest.height,
       miner: `http://localhost:${this.port}`,
+      transactions: txsToMine,
       difficulty: this.difficulty
     };
     try {
@@ -373,14 +451,14 @@ export class CebularzNode {
 }
 
 // Helper factory for CLI
-export function startNode(port: number, bootstrap?: string | string[], miner?: boolean, difficulty?: number) {
+export function startNode(port: number, miningAddress: string, bootstrap?: string | string[], miner?: boolean, difficulty?: number) {
   const boots = typeof bootstrap === 'string'
       ? [bootstrap]
       : Array.isArray(bootstrap)
           ? bootstrap.filter(b => b && b.length)
           : undefined;
 
-  const cfg: NodeConfig = {port};
+  const cfg: NodeConfig = {port, miningAddress};
   if (boots && boots.length) cfg.bootstrap = boots;
   if (miner) cfg.miner = true;
   if (typeof difficulty === 'number') cfg.difficulty = difficulty;

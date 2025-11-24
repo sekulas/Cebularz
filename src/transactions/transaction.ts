@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
-import { BASE64, HASH_ID_ALGO, HEX } from "../wallet/const.js";
+import { BASE64, HASH_ID_ALGO, HEX } from "../wallet/const.ts";
 import { createPrivateKey, createPublicKey, sign as edSign, verify as edVerify } from 'crypto';
+import { validateCoinbaseTx } from "./coinbase.ts";
+import _ from "lodash";
 
 export class TxIn {
     public txOutId: string;
@@ -31,10 +33,10 @@ export class Transaction {
     public txIns: TxIn[]
     public txOuts: TxOut[]
 
-    constructor(id: string, txIns: TxIn[], txOuts: TxOut[]) {
-        this.id = id;
+    constructor(txIns: TxIn[], txOuts: TxOut[]) {
         this.txIns = txIns;
         this.txOuts = txOuts;
+        this.id = generateTransactionId(txIns, txOuts);
     }
 }
 
@@ -52,12 +54,12 @@ export class UnspentTxOut {
     }
 }
 
-export const getTransactionId = (transaction: Transaction): string => {
-    const txInContent: string = transaction.txIns
+export const generateTransactionId = (txIns: TxIn[], txOuts: TxOut[]): string => {
+    const txInContent: string = txIns
         .map((txIn) => txIn.txOutId + txIn.txOutIndex)
         .reduce((acc, val) => acc + val, '');
-
-    const txOutContent: string = transaction.txOuts
+        
+    const txOutContent: string = txOuts
         .map((txOut) => txOut.address + txOut.amount)
         .reduce((acc, val) => acc + val, '');
 
@@ -126,7 +128,7 @@ export const isValidTransactionStructure = (raw: unknown): raw is Transaction =>
 };
 
 export const validateTransaction = (transaction: Transaction, aUnspentTxOuts: UnspentTxOut[]): boolean => {
-    if (getTransactionId(transaction) !== transaction.id) {
+    if (generateTransactionId(transaction.txIns, transaction.txOuts) !== transaction.id) {
         console.log('invalid tx id: ' + transaction.id);
         return false;
     }
@@ -180,10 +182,58 @@ export const validateTxIn = (txIn: TxIn, transaction: Transaction, aUnspentTxOut
     return edVerify(null, msg, publicKey, signature);
 };
 
-export const getTxInAmount = (txIn: TxIn, aUnspentTxOuts: UnspentTxOut[]): number => {
-    const utxo = findUnspentTxOut(txIn.txOutId, txIn.txOutIndex, aUnspentTxOuts);
+export const getTxInAmount = (txIn: TxIn, uTxOuts: UnspentTxOut[]): number => {
+    const utxo = findUnspentTxOut(txIn.txOutId, txIn.txOutIndex, uTxOuts);
     if (!utxo) {
         throw new Error('Referenced UTXO not found');
     }
     return utxo.amount;
+};
+
+const hasDuplicates = (txIns: TxIn[]): boolean => {
+    const groups = _.countBy(txIns, (txIn: TxIn) => txIn.txOutId + txIn.txOutIndex);
+    return _(groups)
+        .map((value, key) => {
+            if (value > 1) {
+                console.log('duplicate txIn: ' + key);
+                return true;
+            } else {
+                return false;
+            }
+        })
+        .includes(true);
+};
+
+
+const validateBlockTransactions = (txs: Transaction[], uTxOs: UnspentTxOut[], blockIndex: number): boolean => {
+    const coinbaseTx = txs[0];
+    if (!coinbaseTx || !validateCoinbaseTx(coinbaseTx, blockIndex)) {
+        console.log('invalid coinbase transaction: ' + JSON.stringify(coinbaseTx));
+        return false;
+    }
+
+    const txIns: TxIn[] = _(txs)
+        .map((tx) => tx.txIns)
+        .flatten()
+        .value();
+
+    if (hasDuplicates(txIns)) {
+        return false;
+    }
+
+    // All but coinbase
+    const normalTransactions: Transaction[] = txs.slice(1);
+    return normalTransactions.map((tx) => validateTransaction(tx, uTxOs))
+        .reduce((a, b) => (a && b), true);
+
+};
+
+export const processTransactions = (txs: Transaction[], uTxOs: UnspentTxOut[], blockIndex: number): UnspentTxOut[] | null => {
+    if (!validateBlockTransactions(txs, uTxOs, blockIndex)) {
+        console.log('invalid block transactions');
+        return null;
+    }
+
+    // Update - remove spent UTXOs and add new UTXOs
+    return updateUnspentTxOuts(txs, uTxOs);
 };

@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { startNode } from './node.js';
 import log from "loglevel";
 
-log.setLevel("info");
+log.setLevel("debug");
 
 const program = new Command();
 program
@@ -16,6 +16,7 @@ program
   .option('-b, --bootstrap <urls>', 'comma separated bootstrap peer URLs (http://localhost:4000,http://localhost:4001)')
   .option('-m, --miner', 'enable miner mode')
   .option('-d, --difficulty <n>', 'hex difficulty (leading zeroes)', '2')
+  .option('-a, --address <address>', 'mining reward address')
   .action(opts => {
     const port = parseInt(opts.port, 10);
     if (isNaN(port) || port < 1 || port > 65535) {
@@ -31,11 +32,18 @@ program
     }
     const miner: boolean = !!opts.miner;
     const difficulty = parseInt(opts.difficulty, 10);
+
+    if (miner && !opts.address) {
+      log.error('Error: Mining reward address must be specified in miner mode using the -a or --address option.');
+      process.exit(1);
+    }
+
     if (isNaN(difficulty) || difficulty < 0 || difficulty > 64) {
       log.error('Error: Invalid difficulty (0..64)');
       process.exit(1);
     }
-    startNode(port, bootstrap, miner, difficulty);
+    
+    startNode(port, opts.address, bootstrap, miner, difficulty);
   });
 
 program.parseAsync(process.argv);
