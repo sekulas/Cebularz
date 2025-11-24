@@ -1,5 +1,5 @@
 import express from 'express';
-import {PING_INTERVAL_MS} from './const.js';
+import {PING_INTERVAL_MS, RESTART_DEBOUNCE_MS} from './const.js';
 import {Block, createGenesisBlock, isValidNewBlock, validateChain} from './blockchain.js';
 import {Worker} from 'node:worker_threads';
 import log from "loglevel";
@@ -31,6 +31,7 @@ export class CebularzNode {
   private cancelSAB?: SharedArrayBuffer;
   private miningInProgress = false;
   private miningRestartPending = false;
+  private restartDebounceTimer: NodeJS.Timeout | null = null;
 
   private unspentTxOuts: UnspentTxOut[] = [];
   private transactionPool: Transaction[] = [];
@@ -141,41 +142,44 @@ export class CebularzNode {
           got: block.height
         });
       }
-      const v = isValidNewBlock(block, latest, this.difficulty);
-      if (!v.ok) {
-        return res.status(400).json({ok: false, error: v.reason});
-      }
-      this.chain.push(block);
+      
+      this.handleReceivedBlock(block);
+
       log.info(`[node:${this.port}] accepted block height=${block.height} hash=${block.hash.slice(0, 16)} from ${sender || 'unknown'}...`);
-      // propagacja dalej jeśli nie byliśmy jeszcze na liście previousPeers
-      if (!alreadyVisited) {
-        this.broadcastBlock(block, sender, previousPeers).then();
-      } else {
-        log.debug(`[node:${this.port}] not rebroadcasting (already in previousPeers)`);
+      
+      const newLatest = this.getLatestBlock();
+
+      if(newLatest.height === block.height) {
+        if (!alreadyVisited) {
+          this.broadcastBlock(block, sender, previousPeers).then();
+        }
+        if (this.miner) this.requestMiningRestart();
+        res.json({ok: true, height: block.height});
       }
-      if (this.miner) this.requestMiningRestart();
-      res.json({ok: true, height: block.height});
+      else {
+        res.status(400).json({ok: false, error: 'block validation failed'});
+      }
     });
 
     this.app.post('/transactions', (req, res) => {
-      const tx: Transaction | undefined = req.body?.transaction;
-      if (!tx || typeof tx !== 'object') {
+      const tx: Transaction | undefined = req.body;
+      if (!tx || typeof tx !== 'object' || !tx.id) {
         return res.status(400).json({error: 'transaction required'});
       }
       this.addToTransactionPool(tx);
-      res.send({ok: true, txId: tx.id})
+      res.json({ok: true, txId: tx.id})
     })
 
     this.app.get('/unspent/:address', (req, res) => {
       const address = req.params.address;
-      const myUnspent = this.unspentTxOuts.filter(u => u.address === address);
-      res.json({address, unspentTxOuts: myUnspent});
+      const uTxOs = this.unspentTxOuts.filter(u => u.address === address);
+      res.json(uTxOs);
     })
 
     this.app.get('/balance/:address', (req, res) => {
       const address = req.params.address;
-      const myUnspent = this.unspentTxOuts.filter(u => u.address === address);
-      const balance = myUnspent.reduce((a, b) => a + b.amount, 0);
+      const uTxOs = this.unspentTxOuts.filter(u => u.address === address);
+      const balance = uTxOs.reduce((a, b) => a + b.amount, 0);
       res.json({address, balance});
     });
   }
@@ -185,10 +189,14 @@ export class CebularzNode {
         log.warn(`Trying to add invalid tx to pool: ${tx.id}`);
         return;
     }
-    if (this.transactionPool.find(t => t.id === tx.id)) return;
-    
+    if (this.transactionPool.find(t => t.id === tx.id)) {
+      log.warn(`Tx already in pool: ${tx.id}`);
+      return;
+    }
     log.info(`Added tx to pool: ${tx.id}`);
     this.transactionPool.push(tx);
+
+    if (this.miner) this.requestMiningRestart();
   }
 
   private updateTransactionPool(minedTxs: Transaction[]) {
@@ -277,7 +285,19 @@ export class CebularzNode {
       if (!v.ok) throw new Error(`remote chain invalid: ${v.reason}`);
       // FIXME: change in future - comparison based on accumulated difficulty, but not length
       if (data.chain.length > this.chain.length) {
+        let tempUTxO: UnspentTxOut[] = [];
+        for (let i = 0; i < data.chain.length; i++) {
+          const block = data.chain[i];
+          if (!block) continue;
+          const newUTxO = processTransactions(block.data.transactions, tempUTxO, block.height);
+          if (newUTxO === null) {
+            log.warn(`[node:${this.port}] sync failed at block ${i}: invalid transactions`);
+            return;
+          }
+          tempUTxO = newUTxO;
+        }
         this.chain = data.chain;
+        this.unspentTxOuts = tempUTxO;
         log.info(`[node:${this.port}] chain synced from ${peerUrl} height=${this.getLatestBlock().height}`);
         if (this.miner) this.requestMiningRestart();
       } else {
@@ -319,6 +339,7 @@ export class CebularzNode {
     const workerPath = new URL('./miner-worker.ts', import.meta.url);
     this.miningWorker = new Worker(workerPath, {execArgv: ['--import', 'tsx']});
     this.miningWorker.on('message', (msg: any) => {
+      log.debug(`[node:${this.port}] mining worker message received: ${JSON.stringify(msg)}`);
       if (msg && msg.ok && msg.block) {
         const block: Block = msg.block;
 
@@ -398,6 +419,21 @@ export class CebularzNode {
 
   private requestMiningRestart() {
     if (!this.miner) return;
+
+    if (this.restartDebounceTimer) {
+      clearTimeout(this.restartDebounceTimer);
+    }
+
+    log.debug(`[node:${this.port}] scheduling mining restart in ${RESTART_DEBOUNCE_MS}ms`);
+
+    this.restartDebounceTimer = setTimeout(() => {
+      this.performMiningRestart();
+      this.restartDebounceTimer = null;
+    }, RESTART_DEBOUNCE_MS);
+
+  }
+
+  private performMiningRestart() {
     if (this.miningInProgress && this.cancelSAB) {
       Atomics.store(new Int32Array(this.cancelSAB), 0, 1);
       this.miningRestartPending = true;

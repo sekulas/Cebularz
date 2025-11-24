@@ -183,7 +183,7 @@ program
 
       const myAddress = id;
       const utxoRes = await fetch(`${nodeUrl}/unspent/${myAddress}`);
-      const myUTxOs: UnspentTxOut[] = utxoRes.data;
+      const myUTxOs: UnspentTxOut[] = await utxoRes.json();
 
       const {leftover, includedUTxOs} = findTxOutsForAmount(amount, myUTxOs)
 
@@ -201,10 +201,18 @@ program
 
       log.info('Sending transaction ID:', tx.id);
       const sendRes = await fetch(`${nodeUrl}/transactions`, {
-        method: 'POST', 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(tx)
-      })
-      log.info('Success!', sendRes.body);
+      });
+      
+      if (!sendRes.ok) {
+        const errorText = await sendRes.text();
+        throw new Error(`Node rejected transaction: ${sendRes.status} ${errorText}`);
+      }
+      
+      const result = await sendRes.json();
+      log.info('Transaction accepted by node:', result);
     } catch (e) {
       log.error('Transaction failed:', e);
     }

@@ -16,10 +16,6 @@ export const findTxOutsForAmount = (amount: number, myUTxOs: UnspentTxOut[]): { 
     throw Error('not enough coins to spend');
 }
 
-const toUnsignedTxIn = (uTxO: UnspentTxOut): TxIn => {
-    return new TxIn(uTxO.txOutId, uTxO.txOutIndex, '', '');
-}
-
 export const createTxOuts = (receiverAddress: string, amount: number, leftover: number, myAddress: string): TxOut[] => {
     const desiredTxOut: TxOut = new TxOut(receiverAddress, amount);
     if (leftover > 0) {

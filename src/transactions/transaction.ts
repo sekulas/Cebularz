@@ -3,6 +3,7 @@ import { BASE64, HASH_ID_ALGO, HEX } from "../wallet/const.ts";
 import { createPrivateKey, createPublicKey, sign as edSign, verify as edVerify } from 'crypto';
 import { validateCoinbaseTx } from "./coinbase.ts";
 import _ from "lodash";
+import log from "loglevel";
 
 export class TxIn {
     public txOutId: string;
@@ -78,7 +79,8 @@ export const signTxIn = (transaction: Transaction, txInIndex: number, privateKey
     const derivedAddress = createHash(HASH_ID_ALGO).update(txIn.publicKey).digest(HEX);
     if (derivedAddress !== referencedUnspentTxOut.address) throw new Error('Public key does not match UTXO owner');
 
-    const msg = Buffer.from(transaction.id);
+    // transaction.id jest hex string, więc musimy go zdekodować do Buffer
+    const msg = Buffer.from(transaction.id, HEX);
     const keyObj = createPrivateKey(privateKey);
     return edSign(null, msg, keyObj).toString(BASE64);
 }
@@ -127,59 +129,46 @@ export const isValidTransactionStructure = (raw: unknown): raw is Transaction =>
   return true;
 };
 
-export const validateTransaction = (transaction: Transaction, aUnspentTxOuts: UnspentTxOut[]): boolean => {
-    if (generateTransactionId(transaction.txIns, transaction.txOuts) !== transaction.id) {
-        console.log('invalid tx id: ' + transaction.id);
-        return false;
-    }
-
-    const hasValidTxIns: boolean = transaction.txIns
-        .map((txIn) => validateTxIn(txIn, transaction, aUnspentTxOuts))
-        .reduce((a, b) => a && b, true);
-
-    if (!hasValidTxIns) {
-        console.log('some of the txIns are invalid in tx: ' + transaction.id);
-        return false;
-    }
-
-    const totalTxInValues: number = transaction.txIns
-        .map((txIn) => getTxInAmount(txIn, aUnspentTxOuts))
-        .reduce((acc, val) => (acc + val), 0);
-        
-    const totalTxOutValues: number = transaction.txOuts
-        .map((txOut) => txOut.amount)
-        .reduce((acc, val) => (acc + val), 0);
-
-    if (totalTxOutValues !== totalTxInValues) {
-        console.log('totalTxOutValues !== totalTxInValues in tx: ' + transaction.id);
-        return false;
-    }
-
-    return true;
-};
-
-export const validateTxIn = (txIn: TxIn, transaction: Transaction, aUnspentTxOuts: UnspentTxOut[]): boolean => {
+export const validateTxIn = (txIn: TxIn, transaction: Transaction, uTxOuts: UnspentTxOut[]): boolean => {
     const referencedUTxOut: UnspentTxOut | undefined =
-        aUnspentTxOuts.find((uTxO) => uTxO.txOutId === txIn.txOutId);
+        findUnspentTxOut(txIn.txOutId, txIn.txOutIndex, uTxOuts);
 
     if (referencedUTxOut == undefined) {
-        console.log('referenced txOut not found: ' + JSON.stringify(txIn));
-        return false;
-    }
-    
-    const address = referencedUTxOut.address;
-    const derivedAddress = createHash(HASH_ID_ALGO).update(txIn.publicKey).digest(HEX);
-    
-    if (derivedAddress !== address) {
-        console.log('public key does not match address');
+        log.debug(`[VALIDATE_ERROR] UTXO not found for txIn: ${txIn.txOutId}:${txIn.txOutIndex}`);
         return false;
     }
 
-    const msg = Buffer.from(transaction.id);
-    const signature = Buffer.from(txIn.signature, BASE64);
-    const publicKey = createPublicKey(txIn.publicKey);
+    const address = referencedUTxOut.address;
     
-    return edVerify(null, msg, publicKey, signature);
+    const derivedAddress = createHash(HASH_ID_ALGO).update(txIn.publicKey).digest(HEX);
+
+    if (derivedAddress !== address) {
+        log.debug(`[VALIDATE_ERROR] Address mismatch!`);
+        log.debug(`  Expected (UTXO owner): ${address}`);
+        log.debug(`  Derived (from PubKey): ${derivedAddress}`);
+        log.debug(`  PubKey sent: ${JSON.stringify(txIn.publicKey)}`);
+        return false;
+    }
+
+    const msg = Buffer.from(transaction.id, HEX);
+    const signature = Buffer.from(txIn.signature, BASE64);
+    
+    let publicKey;
+    try {
+        publicKey = createPublicKey(txIn.publicKey);
+    } catch (e) {
+        log.debug(`[VALIDATE_ERROR] Failed to create KeyObject from PEM:`, e);
+        return false;
+    }
+
+    const valid = edVerify(null, msg, publicKey, signature);
+    
+    if (!valid) {
+        log.debug(`[VALIDATE_ERROR] Signature Invalid!`);
+        log.debug(`  TxID signed: ${transaction.id}`);
+    }
+
+    return valid;
 };
 
 export const getTxInAmount = (txIn: TxIn, uTxOuts: UnspentTxOut[]): number => {
@@ -193,7 +182,7 @@ export const getTxInAmount = (txIn: TxIn, uTxOuts: UnspentTxOut[]): number => {
 const hasDuplicates = (txIns: TxIn[]): boolean => {
     const groups = _.countBy(txIns, (txIn: TxIn) => txIn.txOutId + txIn.txOutIndex);
     return _(groups)
-        .map((value, key) => {
+        .map((value: number, key: string) => {
             if (value > 1) {
                 console.log('duplicate txIn: ' + key);
                 return true;
@@ -208,12 +197,12 @@ const hasDuplicates = (txIns: TxIn[]): boolean => {
 const validateBlockTransactions = (txs: Transaction[], uTxOs: UnspentTxOut[], blockIndex: number): boolean => {
     const coinbaseTx = txs[0];
     if (!coinbaseTx || !validateCoinbaseTx(coinbaseTx, blockIndex)) {
-        console.log('invalid coinbase transaction: ' + JSON.stringify(coinbaseTx));
+        log.debug('invalid coinbase transaction: ' + JSON.stringify(coinbaseTx));
         return false;
     }
 
     const txIns: TxIn[] = _(txs)
-        .map((tx) => tx.txIns)
+        .map((tx: Transaction) => tx.txIns)
         .flatten()
         .value();
 
@@ -228,9 +217,48 @@ const validateBlockTransactions = (txs: Transaction[], uTxOs: UnspentTxOut[], bl
 
 };
 
+export const validateTransaction = (transaction: Transaction, aUnspentTxOuts: UnspentTxOut[]): boolean => {
+    // Sprawdź strukturę
+    if (!isValidTransactionStructure(transaction)) {
+        log.debug('invalid tx structure: ' + JSON.stringify(transaction));
+        return false;
+    }
+
+    // Sprawdź ID
+    const recalculatedId = generateTransactionId(transaction.txIns, transaction.txOuts);
+    if (recalculatedId !== transaction.id) {
+        log.debug(`invalid tx id: expected ${recalculatedId}, got ${transaction.id}`);
+        return false;
+    }
+    
+    // Sprawdź każdy TxIn
+    for (const txIn of transaction.txIns) {
+        if (!validateTxIn(txIn, transaction, aUnspentTxOuts)) {
+            log.debug('invalid txIn: ' + JSON.stringify(txIn));
+            return false;
+        }
+    }
+
+    // Sprawdź sumy input/output
+    const totalTxInValues = transaction.txIns
+        .map((txIn) => getTxInAmount(txIn, aUnspentTxOuts))
+        .reduce((a, b) => a + b, 0);
+        
+    const totalTxOutValues = transaction.txOuts
+        .map((txOut) => txOut.amount)
+        .reduce((a, b) => a + b, 0);
+
+    if (totalTxInValues !== totalTxOutValues) {
+        log.debug(`invalid tx values: totalTxInValues ${totalTxInValues} !== totalTxOutValues ${totalTxOutValues}`);
+        return false;
+    }
+    
+    return true;
+}
+
 export const processTransactions = (txs: Transaction[], uTxOs: UnspentTxOut[], blockIndex: number): UnspentTxOut[] | null => {
     if (!validateBlockTransactions(txs, uTxOs, blockIndex)) {
-        console.log('invalid block transactions');
+        log.debug('invalid block transactions');
         return null;
     }
 
