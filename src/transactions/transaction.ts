@@ -195,6 +195,14 @@ const hasDuplicates = (txIns: TxIn[]): boolean => {
 
 
 const validateBlockTransactions = (txs: Transaction[], uTxOs: UnspentTxOut[], blockIndex: number): boolean => {
+    if (blockIndex === 0) {
+        if (txs.length !== 0) {
+            log.debug('genesis block should have no transactions');
+            return false;
+        }
+        return true;
+    }
+
     const coinbaseTx = txs[0];
     if (!coinbaseTx || !validateCoinbaseTx(coinbaseTx, blockIndex)) {
         log.debug('invalid coinbase transaction: ' + JSON.stringify(coinbaseTx));
