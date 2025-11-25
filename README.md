@@ -97,3 +97,173 @@ curl -s http://localhost:4500/peers | jq
 - Zwiększenie trudności (np. 3,4) znacząco spowalnia kopanie i zużywa więcej CPU.
 - Przy `difficulty=0` PoW jest wyłączone (hash może zaczynać się od dowolnego znaku), bloki powstają bardzo szybko.
 - Obecnie brak mechanizmu zatrzymania kopania – wyłączenie górnika = zakończenie procesu.
+
+---
+
+# Etap 3: Transakcje przekazania środków (10p)
+
+## Zrealizowane funkcjonalności
+
+### 1. **Tworzenie transakcji**
+- Struktura transakcji: `Transaction { id, txIns[], txOuts[] }`
+- **TxIn** (wejście): `{ txOutId, txOutIndex, signature, publicKey }`
+- **TxOut** (wyjście): `{ address, amount }`
+- **ID transakcji**: SHA-256 hash z konkatenacji wszystkich inputów i outputów
+- **Podpisywanie**: Ed25519 - każde TxIn jest podpisane kluczem prywatnym nadawcy
+- **UTXO model**: Unspent Transaction Outputs - każdy output może być wydany tylko raz
+- **Adres**: SHA-256 hash klucza publicznego
+
+### 2. **Transakcja Coinbase (tworzenie nowych monet)**
+- **Pierwsza transakcja w każdym bloku** to coinbase
+- Tworzy nowe monety z powietrza (brak prawdziwego inputu)
+- Nagroda: **100 monet** za wykopany blok
+- TxIn: `txOutId = ''`, `txOutIndex = blockHeight` (unikalność)
+- TxOut: nagroda trafia na adres minera (`--address`)
+- Walidacja coinbase: sprawdza unikalność, poprawność kwoty, strukturę
+
+### 3. **Proof-of-Work (konsensus)**
+- Worker w osobnym wątku (`miner-worker.ts`) aby nie blokować serwera HTTP
+- Iteracja przez `nonce` aż hash spełni trudność (N wiodących zer)
+- Blok zawiera: `height`, `timestamp`, `prevHash`, `data: { miner, transactions[] }`, `nonce`, `difficulty`, `hash`
+- Każdy blok zawiera coinbase + max 2 transakcje z mempoola
+- Możliwość anulowania kopania (SharedArrayBuffer) gdy pojawi się nowy blok
+
+### 4. **Walidacja double-spending**
+
+#### A) **W obrębie jednego bloku**:
+- Funkcja `hasDuplicates()` sprawdza czy żadne TxIn nie próbuje wydać tego samego UTXO
+
+#### B) **Między blokami**:
+- **UTXO set tracking**: węzeł przechowuje aktualny zbiór niewydanych outputów
+- Każda transakcja jest walidowana względem UTXO set:
+  - Sprawdza czy referencyjny UTXO istnieje (`findUnspentTxOut()`)
+  - Sprawdza czy adres pochodzący z klucza publicznego zgadza się z właścicielem UTXO
+  - Weryfikuje podpis Ed25519
+  - Sprawdza bilans: suma inputów = suma outputów
+- Po zaakceptowaniu bloku:
+  - Usuwa wydane UTXO z setu
+  - Dodaje nowe UTXO z outputów transakcji
+
+#### C) **Walidacja całego bloku**:
+- `validateBlockTransactions()`:
+  1. Waliduje coinbase (struktura, kwota, wysokość)
+  2. Sprawdza duplikaty w całym bloku
+  3. Waliduje każdą normalną transakcję (UTXO, podpisy, bilans)
+
+### 5. **Obliczanie sald na kontach**
+- **REST API**:
+  - `GET /balance/:address` - zwraca sumę wszystkich UTXO dla adresu
+  - `GET /unspent/:address` - lista wszystkich UTXO dla adresu
+- **UTXO set** aktualizowany przy każdym nowym bloku:
+  - Własnym (wykopany przez węzeł)
+  - Obcym (otrzymany od peerów)
+  - Podczas synchronizacji (przebudowa od genesis)
+- Saldo = suma `amount` wszystkich UTXO należących do danego adresu
+
+## Użycie - przykładowy scenariusz
+
+### 1. **Uruchom węzeł z minerem**
+```bash
+# Terminal 1: Węzeł-górnik z adresem do nagrody
+npm run node -- --port 4500 --miner --address 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 --difficulty 6 
+```
+
+**Adres** = SHA-256(publicKey) z tożsamości w portfelu
+
+### 2. **Poczekaj aż wykopie kilka bloków**
+```bash
+# Obserwuj logi:
+# [node:4500] mined block height=1 hash=00a3f2... attempts=1234 ms=150
+# [node:4500] Block accepted height=1 difficulty=2. UTXO set size: 1
+```
+
+### 3. **Sprawdź saldo minera**
+```bash
+# Terminal 2: Sprawdź ile monet zarobił miner
+npm run wallet -- balance http://localhost:4500 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2
+
+# Wynik: Balance for address ...: 500
+# (5 bloków × 100 monet = 500)
+```
+
+### 4. **Lista UTXO (opcjonalnie)**
+```bash
+# Zobacz szczegóły niewydanych outputów
+npm run wallet -- utxos http://localhost:4500 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2
+curl http://localhost:4500/unspent/24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 | jq
+```
+
+### 5. **Utwórz portfel odbiorcy**
+```bash
+# Terminal 3
+npm run wallet -- init receiver-wallet.json
+npm run wallet -- add-identity receiver-wallet.json --label receiver
+
+# Zapisz adres odbiorcy (wyświetli się po add-identity):
+# Address: 0df7c4bc8125afc551eb2cf7e25620ccbd00da630b768e458258e02f742051fa
+```
+
+### 6. **Wyślij transakcję**
+```bash
+# Terminal 2: Wyślij 50 monet z portfela minera do odbiorcy
+npm run wallet -- send mywallet.json 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 cfa4cdbf482b37040ed6425eb5f84a31295460cf7d97341cba194e394faf7815 50 http://localhost:4500
+```
+> `npm run wallet -- send receiver-wallet.json cfa4cdbf482b37040ed6425eb5f84a31295460cf7d97341cba194e394faf7815  24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 12 http://localhost:4500`
+
+### 7. **Poczekaj na wykopanie bloku z transakcją**
+```bash
+# Terminal 1 (logi węzła):
+# [node:4500] Added tx to pool: a3f2b...
+# [node:4500] mining job started (prevHeight=5, difficulty=2)
+# [node:4500] mined block height=6 hash=00d4e1... (zawiera tę transakcję)
+```
+
+### 8. **Sprawdź nowe salda**
+```bash
+npm run wallet -- balance http://localhost:4500 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2
+npm run wallet -- balance http://localhost:4500 cfa4cdbf482b37040ed6425eb5f84a31295460cf7d97341cba194e394faf7815
+```
+
+## Komendy CLI Wallet
+
+# Sprawdzenie salda
+npm run wallet -- balance <nodeUrl> <address>
+
+# Lista UTXO dla adresu
+npm run wallet -- unspent <nodeUrl> <address>
+
+# Wysłanie transakcji
+npm run wallet -- send \
+  <plik.json> \
+  <senderAddress> \
+  <receiverAddress> \
+  <amount> \
+  <nodeUrl>
+```
+
+## Testowanie double-spending
+
+### Scenariusz 1: Double-spending w jednym bloku (ZABLOKOWANE)
+```bash
+# Spróbuj wydać ten sam UTXO dwa razy w jednej transakcji
+# → Walidacja wykryje duplikat TxIn
+# → Blok zostanie odrzucony
+```
+
+### Scenariusz 2: Double-spending między blokami (ZABLOKOWANE)
+```bash
+# 1. Wyślij transakcję: Alice → Bob 50
+# 2. Poczekaj aż wejdzie do bloku (UTXO wydane)
+# 3. Spróbuj ponownie wydać ten sam UTXO: Alice → Charlie 50
+# → Walidacja: UTXO nie istnieje w UTXO set
+# → Transakcja odrzucona
+```
+
+## Mempool (Transaction Pool)
+
+- Węzeł przechowuje transakcje oczekujące na wykopanie w `transactionPool[]`
+- Dodanie transakcji: `POST /transactions`
+  - Walidacja względem aktualnego UTXO set
+  - Sprawdzenie czy transakcja już nie jest w zbiorze
+- Mining: Górnik bierze max 2 transakcje z poola + coinbase
+- Po wykopaniu bloku: usunięcie zmainowanych transakcji z poola
