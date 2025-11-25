@@ -166,14 +166,32 @@ export class CebularzNode {
       if (!tx || typeof tx !== 'object' || !tx.id) {
         return res.status(400).json({error: 'transaction required'});
       }
-      this.addToTransactionPool(tx);
+      const added = this.addToTransactionPool(tx);
+      if (!added) {
+        return res.status(400).json({error: 'transaction rejected (invalid, duplicate, or double-spend)', txId: tx.id});
+      }
       res.json({ok: true, txId: tx.id})
     })
 
     this.app.get('/unspent/:address', (req, res) => {
       const address = req.params.address;
-      const uTxOs = this.unspentTxOuts.filter(u => u.address === address);
-      res.json(uTxOs);
+      
+      // Zbierz UTXO już użyte przez transakcje w mempool
+      const usedInMempool = new Set<string>();
+      for (const poolTx of this.transactionPool) {
+        for (const txIn of poolTx.txIns) {
+          usedInMempool.add(`${txIn.txOutId}:${txIn.txOutIndex}`);
+        }
+      }
+      
+      // Zwróć tylko UTXO które NIE są użyte przez transakcje w mempool
+      const availableUTxOs = this.unspentTxOuts.filter(u => {
+        if (u.address !== address) return false;
+        const key = `${u.txOutId}:${u.txOutIndex}`;
+        return !usedInMempool.has(key);
+      });
+      
+      res.json(availableUTxOs);
     })
 
     this.app.get('/balance/:address', (req, res) => {
@@ -184,19 +202,37 @@ export class CebularzNode {
     });
   }
 
-  private addToTransactionPool(tx: Transaction) {
+  private addToTransactionPool(tx: Transaction): boolean {
     if (!validateTransaction(tx, this.unspentTxOuts)) {
         log.warn(`Trying to add invalid tx to pool: ${tx.id}`);
-        return;
+        return false;
     }
     if (this.transactionPool.find(t => t.id === tx.id)) {
       log.warn(`Tx already in pool: ${tx.id}`);
-      return;
+      return false;
     }
+    
+    // Sprawdź czy UTXO nie są już użyte w innych transakcjach w mempool (double-spending)
+    const usedUTxOs = new Set<string>();
+    for (const poolTx of this.transactionPool) {
+      for (const txIn of poolTx.txIns) {
+        usedUTxOs.add(`${txIn.txOutId}:${txIn.txOutIndex}`);
+      }
+    }
+    
+    for (const txIn of tx.txIns) {
+      const key = `${txIn.txOutId}:${txIn.txOutIndex}`;
+      if (usedUTxOs.has(key)) {
+        log.warn(`Tx ${tx.id} tries to double-spend UTXO already in mempool: ${key}`);
+        return false;
+      }
+    }
+    
     log.info(`Added tx to pool: ${tx.id}`);
     this.transactionPool.push(tx);
 
     if (this.miner) this.requestMiningRestart();
+    return true;
   }
 
   private updateTransactionPool(minedTxs: Transaction[]) {
