@@ -1,5 +1,5 @@
 import express from 'express';
-import {PING_INTERVAL_MS, RESTART_DEBOUNCE_MS} from './const.js';
+import {PING_INTERVAL_MS, RESTART_DEBOUNCE_MS, TX_PER_BLOCK} from './const.js';
 import {Block, createGenesisBlock, isValidNewBlock, validateChain} from './blockchain.js';
 import {Worker} from 'node:worker_threads';
 import log from "loglevel";
@@ -431,7 +431,7 @@ export class CebularzNode {
     const latest = this.getLatestBlock();
 
     const coinbaseTx = getCoinbaseTransaction(this.miningAddress, latest.height + 1);
-    const txsToMine = [coinbaseTx, ...this.transactionPool.slice(0, 2)]
+    const txsToMine = [coinbaseTx, ...this.transactionPool.slice(0, TX_PER_BLOCK)]
 
     this.cancelSAB = new SharedArrayBuffer(4);
     const view = new Int32Array(this.cancelSAB);

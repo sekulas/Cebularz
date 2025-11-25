@@ -1,4 +1,4 @@
-import { TxIn, TxOut, UnspentTxOut } from "./transaction.ts";
+import { TxOut, UnspentTxOut } from "./transaction.ts";
 
 export const findTxOutsForAmount = (amount: number, myUTxOs: UnspentTxOut[]): { leftover: number, includedUTxOs: UnspentTxOut[] } => {
     let currentAmount = 0;

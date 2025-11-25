@@ -1,4 +1,5 @@
 import { generateTransactionId, Transaction, TxIn, TxOut } from "./transaction.ts";
+import log from "loglevel";
 
 const COINBASE_AMOUNT: number = 100;
 
@@ -10,27 +11,27 @@ export const getCoinbaseTransaction = (address: string, blockIndex: number): Tra
 
 export const validateCoinbaseTx = (transaction: Transaction, blockIndex: number): boolean => {
     if (generateTransactionId(transaction.txIns, transaction.txOuts) !== transaction.id) {
-        console.log('invalid coinbase tx id: ' + transaction.id);
+        log.debug('invalid coinbase tx id: ' + transaction.id);
         return false;
     }
 
     if (transaction.txIns.length !== 1) {
-        console.log('one txIn must be specified in the coinbase transaction');
+        log.debug('one txIn must be specified in the coinbase transaction');
         return false;
     }
 
     if (transaction.txIns[0]?.txOutIndex !== blockIndex) {
-        console.log('the txIn index in coinbase tx must be the block height');
+        log.debug('the txIn index in coinbase tx must be the block height');
         return false;
     }
 
     if (transaction.txOuts.length !== 1) {
-        console.log('invalid number of txOuts in coinbase transaction');
+        log.debug('invalid number of txOuts in coinbase transaction');
         return false;
     }
 
     if (transaction.txOuts[0]?.amount != COINBASE_AMOUNT) {
-        console.log('invalid coinbase amount in coinbase transaction');
+        log.debug('invalid coinbase amount in coinbase transaction');
         return false;
     }
 

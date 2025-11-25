@@ -79,7 +79,6 @@ export const signTxIn = (transaction: Transaction, txInIndex: number, privateKey
     const derivedAddress = createHash(HASH_ID_ALGO).update(txIn.publicKey).digest(HEX);
     if (derivedAddress !== referencedUnspentTxOut.address) throw new Error('Public key does not match UTXO owner');
 
-    // transaction.id jest hex string, więc musimy go zdekodować do Buffer
     const msg = Buffer.from(transaction.id, HEX);
     const keyObj = createPrivateKey(privateKey);
     return edSign(null, msg, keyObj).toString(BASE64);
@@ -184,7 +183,7 @@ const hasDuplicates = (txIns: TxIn[]): boolean => {
     return _(groups)
         .map((value: number, key: string) => {
             if (value > 1) {
-                console.log('duplicate txIn: ' + key);
+                log.debug('duplicate txIn: ' + key);
                 return true;
             } else {
                 return false;
