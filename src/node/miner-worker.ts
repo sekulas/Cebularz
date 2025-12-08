@@ -7,13 +7,14 @@
 
 import { parentPort } from 'node:worker_threads';
 import {hashBlockPayload, type Block, type BlockData} from './blockchain.ts';
+import { Transaction } from '../transactions/transaction.ts';
 
 interface MinePayload {
   prevHash: string;
   prevHeight: number;
   miner: string; // identyfikator/url węzła kopiącego
   difficulty: number; // liczba wiodących zer hex
-  transactions: []; //dodać typ jak zaimplementujemy transakcje
+  transactions: Transaction[]; //dodać typ jak zaimplementujemy transakcje
 }
 
 interface MineCmd {

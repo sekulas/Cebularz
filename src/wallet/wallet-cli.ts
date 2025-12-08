@@ -5,7 +5,10 @@ import { Wallet } from './wallet.js';
 import { BASE64 } from './const.js';
 import { assertStrongPassword, estimatePasswordStrength } from './password-strength.js';
 import log from "loglevel";
+import { signTxIn, Transaction, TxIn, UnspentTxOut } from '../transactions/transaction.ts';
+import { createTxOuts, findTxOutsForAmount } from '../transactions/making-tx.ts';
 
+log.setLevel("info");
 
 const program = new Command();
 program
@@ -108,6 +111,110 @@ program
     } catch (e) {
       log.error('Verification failed:', (e as Error).message);
       process.exit(1);
+    }
+  });
+
+program
+  .command('balance')
+  .argument('<nodeUrl>', 'URL of the Cebularz node, e.g. http://localhost:3000')
+  .argument('<address>', 'address to check balance for')
+  .action(async (nodeUrl, address) => {
+    try {
+      const res = await fetch(`${nodeUrl}/balance/${address}`);
+      if (!res.ok) {
+        log.error('Failed to fetch balance:', res.statusText);
+        process.exit(1);
+      }
+      const data = await res.json();
+      log.info(`Balance for address ${address}: ${data.balance}`);
+    } catch (e) {
+      log.error('Error fetching balance:', (e as Error).message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('utxos')
+  .argument('<nodeUrl>', 'URL of the Cebularz node, e.g. http://localhost:3000')
+  .argument('<address>', 'address to list UTXOs for')
+  .action(async (nodeUrl, address) => {
+    try {
+      const res = await fetch(`${nodeUrl}/unspent/${address}`);
+      if (!res.ok) {
+        log.error('Failed to fetch UTXOs:', res.statusText);
+        process.exit(1);
+      }
+      const data: UnspentTxOut[] = await res.json();
+      if (data.length === 0) {
+        log.info(`No UTXOs found for address ${address}.`);
+      } else {
+        log.info(`UTXOs for address ${address}:`);
+        log.info(data);
+      }
+    } catch (e) {
+      log.error('Error fetching UTXOs:', (e as Error).message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('send')
+  .argument('<file>', 'wallet file path')
+  .argument('<id>', 'sender identity id (address)')
+  .argument('<receiverAddress>', 'receiver address')
+  .argument('<amount>', 'amount to send')
+  .argument('<nodeUrl>', 'URL of the node')
+  .action(async (file, id, receiverAddress, amountStr, nodeUrl) => {
+    const amount = parseInt(amountStr);
+    
+    const wallet = await Wallet.open(file);
+
+    const { masterPassword } = await inquirer.prompt([
+      { type: "password", name: 'masterPassword', message: 'Master password', mask: '*'}
+    ])
+
+    try {
+      const privateKey = wallet.decryptPrivateKey(id, masterPassword)
+      const publicKey = wallet.getPublicKey(id);
+
+      if (publicKey == undefined) {
+        throw new Error('not found pub key for given id');
+      }
+
+      const myAddress = id;
+      const utxoRes = await fetch(`${nodeUrl}/unspent/${myAddress}`);
+      const myUTxOs: UnspentTxOut[] = await utxoRes.json();
+
+      const {leftover, includedUTxOs} = findTxOutsForAmount(amount, myUTxOs)
+
+      const unsignedTxIns: TxIn[] = includedUTxOs.map(u => {
+        return new TxIn(u.txOutId, u.txOutIndex, '', publicKey)
+      })
+
+      const txOuts = createTxOuts(receiverAddress, amount, leftover, myAddress)
+      const tx = new Transaction(unsignedTxIns, txOuts)
+
+      tx.txIns = tx.txIns.map((txIn, index) => {
+        txIn.signature = signTxIn(tx, index, privateKey, myUTxOs);
+        return txIn;
+      })
+
+      log.info('Sending transaction ID:', tx.id);
+      const sendRes = await fetch(`${nodeUrl}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tx)
+      });
+      
+      if (!sendRes.ok) {
+        const errorText = await sendRes.text();
+        throw new Error(`Node rejected transaction: ${sendRes.status} ${errorText}`);
+      }
+      
+      const result = await sendRes.json();
+      log.info('Transaction accepted by node:', result);
+    } catch (e) {
+      log.error('Transaction failed:', e);
     }
   });
 

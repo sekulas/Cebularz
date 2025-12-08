@@ -1,8 +1,9 @@
 import { createHash } from 'crypto';
+import { Transaction } from '../transactions/transaction.ts';
 
 export interface BlockData {
   miner: string; // url minera
-  transactions: any[]; // placeholder pod przyszłe transakcje
+  transactions: Transaction[];
 }
 
 export interface Block {
