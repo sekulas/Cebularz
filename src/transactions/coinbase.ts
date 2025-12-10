@@ -6,11 +6,11 @@ const COINBASE_AMOUNT: number = 100;
 export const getCoinbaseTransaction = (address: string, blockIndex: number): Transaction => {
     const txIn: TxIn = new TxIn('', blockIndex, '', '');
     const txOut: TxOut = new TxOut(address, COINBASE_AMOUNT);
-    return new Transaction([txIn], [txOut]);
+    return new Transaction([txIn], [txOut], Date.now());
 };
 
 export const validateCoinbaseTx = (transaction: Transaction, blockIndex: number): boolean => {
-    if (generateTransactionId(transaction.txIns, transaction.txOuts) !== transaction.id) {
+    if (generateTransactionId(transaction) !== transaction.id) {
         log.debug('invalid coinbase tx id: ' + transaction.id);
         return false;
     }

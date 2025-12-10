@@ -33,11 +33,13 @@ export class Transaction {
     public id: string
     public txIns: TxIn[]
     public txOuts: TxOut[]
+    public timestamp: number
 
-    constructor(txIns: TxIn[], txOuts: TxOut[]) {
+    constructor(txIns: TxIn[], txOuts: TxOut[], timestamp?: number) {
+        this.timestamp = timestamp ?? Date.now();
         this.txIns = txIns;
         this.txOuts = txOuts;
-        this.id = generateTransactionId(txIns, txOuts);
+        this.id = generateTransactionId(this);
     }
 }
 
@@ -55,16 +57,16 @@ export class UnspentTxOut {
     }
 }
 
-export const generateTransactionId = (txIns: TxIn[], txOuts: TxOut[]): string => {
-    const txInContent: string = txIns
+export const generateTransactionId = (transaction: Transaction): string => {
+    const txInContent: string = transaction.txIns
         .map((txIn) => txIn.txOutId + txIn.txOutIndex)
         .reduce((acc, val) => acc + val, '');
         
-    const txOutContent: string = txOuts
+    const txOutContent: string = transaction.txOuts
         .map((txOut) => txOut.address + txOut.amount)
         .reduce((acc, val) => acc + val, '');
 
-    return createHash(HASH_ID_ALGO).update(txInContent + txOutContent).digest(HEX);
+    return createHash(HASH_ID_ALGO).update(txInContent + txOutContent + transaction.timestamp).digest(HEX);
 }
 
 export const signTxIn = (transaction: Transaction, txInIndex: number, privateKey: string, aUnspentTxOuts: UnspentTxOut[]): string => {
@@ -112,6 +114,7 @@ export const isValidTransactionStructure = (raw: unknown): raw is Transaction =>
   if (!raw || typeof raw !== 'object') return false;
   const t = raw as any;
   if (typeof t.id !== 'string') return false;
+  if (typeof t.timestamp !== 'number' || !Number.isFinite(t.timestamp)) return false;
   if (!Array.isArray(t.txIns) || !Array.isArray(t.txOuts)) return false;
   if (!t.txIns.every((i: any) =>
     i && typeof i.txOutId === 'string' &&
@@ -232,9 +235,17 @@ export const validateTransaction = (transaction: Transaction, aUnspentTxOuts: Un
     }
 
     // Sprawdź ID
-    const recalculatedId = generateTransactionId(transaction.txIns, transaction.txOuts);
+    const recalculatedId = generateTransactionId(transaction);
     if (recalculatedId !== transaction.id) {
         log.debug(`invalid tx id: expected ${recalculatedId}, got ${transaction.id}`);
+        return false;
+    }
+    
+    // Sprawdź timestamp
+    const now = Date.now();
+    const oneHourInFuture = now + 60 * 60 * 1000;
+    if (transaction.timestamp > oneHourInFuture) {
+        log.debug(`transaction timestamp too far in future: ${transaction.timestamp}`);
         return false;
     }
     

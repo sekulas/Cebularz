@@ -165,7 +165,7 @@ curl -s http://localhost:4500/peers | jq
 ### 1. **Uruchom węzeł z minerem**
 ```bash
 # Terminal 1: Węzeł-górnik z adresem do nagrody
-npm run node -- --port 4500 --miner --address 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 --difficulty 6 
+npm run node -- --port 4500 --miner --address 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 --difficulty 6 
 ```
 
 **Adres** = SHA-256(publicKey) z tożsamości w portfelu
@@ -180,7 +180,7 @@ npm run node -- --port 4500 --miner --address 24e61caddc8dbab21f152857440122f81c
 ### 3. **Sprawdź saldo minera**
 ```bash
 # Terminal 2: Sprawdź ile monet zarobił miner
-npm run wallet -- balance http://localhost:4500 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2
+npm run wallet -- balance http://localhost:4500 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54
 
 # Wynik: Balance for address ...: 500
 # (5 bloków × 100 monet = 500)
@@ -189,8 +189,8 @@ npm run wallet -- balance http://localhost:4500 24e61caddc8dbab21f152857440122f8
 ### 4. **Lista UTXO (opcjonalnie)**
 ```bash
 # Zobacz szczegóły niewydanych outputów
-npm run wallet -- utxos http://localhost:4500 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2
-curl http://localhost:4500/unspent/24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 | jq
+npm run wallet -- utxos http://localhost:4500 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54
+curl http://localhost:4500/unspent/41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 | jq
 ```
 
 ### 5. **Utwórz portfel odbiorcy**
@@ -206,9 +206,9 @@ npm run wallet -- add-identity receiver-wallet.json --label receiver
 ### 6. **Wyślij transakcję**
 ```bash
 # Terminal 2: Wyślij 50 monet z portfela minera do odbiorcy
-npm run wallet -- send mywallet.json 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 cfa4cdbf482b37040ed6425eb5f84a31295460cf7d97341cba194e394faf7815 50 http://localhost:4500
+npm run wallet -- send mywallet.json 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 518ed3fb9eb55d7402da9027d0f04785c8494ceae8b379b32ed5b371f58d3bf9 50 http://localhost:4500
 ```
-> `npm run wallet -- send receiver-wallet.json cfa4cdbf482b37040ed6425eb5f84a31295460cf7d97341cba194e394faf7815  24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2 12 http://localhost:4500`
+> `npm run wallet -- send receiver-wallet.json 518ed3fb9eb55d7402da9027d0f04785c8494ceae8b379b32ed5b371f58d3bf9  41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 12 http://localhost:4500`
 
 ### 7. **Poczekaj na wykopanie bloku z transakcją**
 ```bash
@@ -220,8 +220,8 @@ npm run wallet -- send mywallet.json 24e61caddc8dbab21f152857440122f81c581a53f54
 
 ### 8. **Sprawdź nowe salda**
 ```bash
-npm run wallet -- balance http://localhost:4500 24e61caddc8dbab21f152857440122f81c581a53f54ff1cb067a5c7ae1882cc2
-npm run wallet -- balance http://localhost:4500 cfa4cdbf482b37040ed6425eb5f84a31295460cf7d97341cba194e394faf7815
+npm run wallet -- balance http://localhost:4500 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54
+npm run wallet -- balance http://localhost:4500 518ed3fb9eb55d7402da9027d0f04785c8494ceae8b379b32ed5b371f58d3bf9
 ```
 
 ## Komendy CLI Wallet
