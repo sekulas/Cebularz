@@ -3,8 +3,13 @@ import {PING_INTERVAL_MS, RESTART_DEBOUNCE_MS, TX_PER_BLOCK} from './const.js';
 import {Block, createGenesisBlock, isValidNewBlock, validateChain} from './blockchain.js';
 import {Worker} from 'node:worker_threads';
 import log from "loglevel";
-import { getCoinbaseTransaction } from '../transactions/coinbase.ts';
-import { processTransactions, Transaction, UnspentTxOut, validateTransaction } from '../transactions/transaction.ts';
+import {getCoinbaseTransaction} from '../transactions/coinbase.ts';
+import {
+  processTransactions,
+  Transaction,
+  UnspentTxOut,
+  validateTransaction
+} from '../transactions/transaction.ts';
 
 export interface NodeConfig {
   port: number;
@@ -25,6 +30,12 @@ export class CebularzNode {
   private miningAddress: string;
 
   private chain: Block[] = [];
+
+  // === Nowe struktury dla forków i orphanami ===
+  private blocksByHash: Map<string, Block> = new Map();
+  private orphanBlocks: Map<string, Block[]> = new Map();
+  private totalDifficultyByHash: Map<string, bigint> = new Map();
+  private chainTipHash: string | null = null;
 
   // Mining worker state
   private miningWorker: Worker | null = null;
@@ -49,8 +60,62 @@ export class CebularzNode {
 
   private initializeChain() {
     if (!this.chain.length) {
-      this.chain.push(createGenesisBlock());
+      const genesis = createGenesisBlock();
+      this.chain.push(genesis);
+      this.blocksByHash.set(genesis.hash, genesis);
+      this.totalDifficultyByHash.set(genesis.hash, this.blockDifficultyWeight(genesis));
+      this.chainTipHash = genesis.hash;
     }
+  }
+
+  // Prosta funkcja wagi trudności dla jednego bloku
+  private blockDifficultyWeight(block: Block): bigint {
+    // Można zastosować np. 2^difficulty, ale dla prostoty użyjemy po prostu difficulty jako BigInt
+    return BigInt(block.difficulty);
+  }
+
+  // Zwraca aktualny tip łańcucha kanonicznego
+  private getLatestBlock(): Block {
+    if (this.chainTipHash) {
+      const tip = this.blocksByHash.get(this.chainTipHash);
+      if (tip) return tip;
+    }
+    const latest = this.chain[this.chain.length - 1];
+    if (!latest) throw new Error('chain empty');
+    return latest;
+  }
+
+  // Przelicza kanoniczny chain[] od zadanej końcówki (hash tipa), genesis at idx 0
+  private calculateChainFromTip(tipHash: string): Block[] {
+    const chain: Block[] = [];
+    let current = this.blocksByHash.get(tipHash) || null;
+    const seen = new Set<string>();
+    while (current) {
+      if (seen.has(current.hash)) break;
+      seen.add(current.hash);
+      chain.push(current);
+      if (current.height === 0) break;
+      current = this.blocksByHash.get(current.prevHash) || null;
+    }
+    chain.reverse();
+    return chain;
+  }
+
+  // Wylicza łączną trudność łańcucha kończącego się na tipHash
+  private getTotalDifficulty(tipHash: string): bigint {
+    const cached = this.totalDifficultyByHash.get(tipHash);
+    if (cached !== undefined) return cached;
+    const tip = this.blocksByHash.get(tipHash);
+    if (!tip) return BigInt(0);
+    if (tip.height === 0) {
+      const d = this.blockDifficultyWeight(tip);
+      this.totalDifficultyByHash.set(tip.hash, d);
+      return d;
+    }
+    const parentTotal = this.getTotalDifficulty(tip.prevHash);
+    const total = parentTotal + this.blockDifficultyWeight(tip);
+    this.totalDifficultyByHash.set(tip.hash, total); // dlaczego nie w momencie dodawania bloku? raz policzymy i wyciągniemy
+    return total;
   }
 
   private setupRoutes() {
@@ -119,46 +184,22 @@ export class CebularzNode {
         return res.json({
           ok: true,
           height: latest.height,
-          ignored: true,
-          reason: 'already visited'
+          ignored: alreadyVisited,
+          reason: alreadyVisited ? 'already visited' : null
         });
       }
 
-      if (block.height <= latest.height) {
-        // Stary lub równy – ignorujemy
-        log.debug(`[node:${this.port}] received block has height ${block.height}, and latest is ${latest.height}. Ignoring!`);
-        return res.json({ok: true, ignored: true, reason: 'height not newer'});
-      }
-      if (block.height !== latest.height + 1) {
-        // Luka – spróbuj zsynchronizować pełen łańcuch od nadawcy
-        if (sender) {
-          log.warn(`[node:${this.port}] gap detected (latest=${latest.height}, incoming=${block.height}) -> triggering full sync from ${sender}`);
-          this.syncFromPeer(sender).catch(e => log.error(`[node:${this.port}] full sync error:`, (e as Error).message));
-        }
-        return res.status(202).json({
-          ok: false,
-          gap: true,
-          expected: latest.height + 1,
-          got: block.height
-        });
-      }
-      
       this.handleReceivedBlock(block);
 
-      log.info(`[node:${this.port}] accepted block height=${block.height} hash=${block.hash.slice(0, 16)} from ${sender || 'unknown'}...`);
-      
+      log.info(`[node:${this.port}] accepted block hash=${block.hash.slice(0, 16)} from ${sender || 'unknown'}...`);
+
       const newLatest = this.getLatestBlock();
 
-      if(newLatest.height === block.height) {
-        if (!alreadyVisited) {
-          this.broadcastBlock(block, sender, previousPeers).then();
-        }
-        if (this.miner) this.requestMiningRestart();
-        res.json({ok: true, height: block.height});
+      if (!alreadyVisited) {
+        this.broadcastBlock(block, sender, previousPeers).then();
       }
-      else {
-        res.status(400).json({ok: false, error: 'block validation failed'});
-      }
+
+      return res.json({ok: true, ignored: false, height: this.getLatestBlock().height});
     });
 
     this.app.post('/transactions', (req, res) => {
@@ -168,14 +209,17 @@ export class CebularzNode {
       }
       const added = this.addToTransactionPool(tx);
       if (!added) {
-        return res.status(400).json({error: 'transaction rejected (invalid, duplicate, or double-spend)', txId: tx.id});
+        return res.status(400).json({
+          error: 'transaction rejected (invalid, duplicate, or double-spend)',
+          txId: tx.id
+        });
       }
       res.json({ok: true, txId: tx.id})
     })
 
     this.app.get('/unspent/:address', (req, res) => {
       const address = req.params.address;
-      
+
       // Zbierz UTXO już użyte przez transakcje w mempool
       const usedInMempool = new Set<string>();
       for (const poolTx of this.transactionPool) {
@@ -183,14 +227,14 @@ export class CebularzNode {
           usedInMempool.add(`${txIn.txOutId}:${txIn.txOutIndex}`);
         }
       }
-      
+
       // Zwróć tylko UTXO które NIE są użyte przez transakcje w mempool
       const availableUTxOs = this.unspentTxOuts.filter(u => {
         if (u.address !== address) return false;
         const key = `${u.txOutId}:${u.txOutIndex}`;
         return !usedInMempool.has(key);
       });
-      
+
       res.json(availableUTxOs);
     })
 
@@ -204,14 +248,14 @@ export class CebularzNode {
 
   private addToTransactionPool(tx: Transaction): boolean {
     if (!validateTransaction(tx, this.unspentTxOuts)) {
-        log.warn(`Trying to add invalid tx to pool: ${tx.id}`);
-        return false;
+      log.warn(`Trying to add invalid tx to pool: ${tx.id}`);
+      return false;
     }
     if (this.transactionPool.find(t => t.id === tx.id)) {
       log.warn(`Tx already in pool: ${tx.id}`);
       return false;
     }
-    
+
     // Sprawdź czy UTXO nie są już użyte w innych transakcjach w mempool (double-spending)
     const usedUTxOs = new Set<string>();
     for (const poolTx of this.transactionPool) {
@@ -219,7 +263,7 @@ export class CebularzNode {
         usedUTxOs.add(`${txIn.txOutId}:${txIn.txOutIndex}`);
       }
     }
-    
+
     for (const txIn of tx.txIns) {
       const key = `${txIn.txOutId}:${txIn.txOutIndex}`;
       if (usedUTxOs.has(key)) {
@@ -227,7 +271,7 @@ export class CebularzNode {
         return false;
       }
     }
-    
+
     log.info(`Added tx to pool: ${tx.id}`);
     this.transactionPool.push(tx);
 
@@ -240,40 +284,98 @@ export class CebularzNode {
     this.transactionPool = this.transactionPool.filter(t => !minedIds.has(t.id));
   }
 
+  // Nowa obsługa przyjmowanego bloku z forkiem/orphanami i reorgiem
   private handleReceivedBlock(block: Block) {
     const latest = this.getLatestBlock();
-    if (block.height <= latest.height) return; // Stary blok
 
-    const result = this.processBlock(block, latest, this.unspentTxOuts, this.difficulty);
-    if (result.ok && result.newTxOs) {
-        this.chain.push(block);
-        this.unspentTxOuts = result.newTxOs;
+    if (this.blocksByHash.has(block.hash)) {
+      log.debug(`([node:${this.port}] block height=${block.height} hash=${block.hash.slice(0, 16)}... already known);`);
+      return; // blok istnieje
+    }
 
-        // Remove mined transactions from pool
-        this.updateTransactionPool(block.data.transactions);
-        log.info(`Block accepted height=${block.height}. UTXO set size: ${this.unspentTxOuts.length}`);
-        if (this.miner) this.requestMiningRestart();
+    if (block.height <= 0) {
+      log.debug(`([node:${this.port}] genesis block received (recvd height ${block.height}) but already have one, ignoring);`)
+      return;
+    }
+
+    const parent = this.blocksByHash.get(block.prevHash);
+    // brak parenta = orphan
+    if (!parent) {
+      const list = this.orphanBlocks.get(block.prevHash) || [];
+      list.push(block);
+      this.orphanBlocks.set(block.prevHash, list);
+      log.debug(`[node:${this.port}] stored orphan block height=${block.height} hash=${block.hash.slice(0, 16)}... prevHash(waiting for)=${block.prevHash.slice(0, 16)}...`);
+      return;
+    }
+
+    //parent jest
+    const validation = isValidNewBlock(block, parent, this.difficulty); //czy nie nalezy przejsc na block.difficulty? (ten blok który przyszedł)
+    if (!validation.ok) {
+      log.warn(`[node:${this.port}] rejected block height=${block.height}: ${validation.reason}`);
+      return;
+    }
+
+
+    //co tutaj w sytuacji gdy wpadnie blok łączący orphan z resztą?
+    const candidateChain: Block[] = this.calculateChainFromTip(block.hash);
+
+    const genesis = this.chain[0];  //createGenesisBlock();
+    if (!genesis || genesis.height !== 0) {
+      log.warn(`[node:${this.port}] genesis missing or invalid during candidate build`);
+      return;
+    }
+
+    if (!candidateChain[0] || candidateChain[0].hash !== genesis.hash) {
+      log.warn(`[node:${this.port}] candidate chain has different genesis, rejecting block height=${block.height}`);
+      return;
+    }
+
+    let tempUTxO: UnspentTxOut[] = [];
+    for (let i = 0; i < candidateChain.length; i++) {
+      const b = candidateChain[i];
+      if (!b) continue;
+      const newUTxO = processTransactions(b.data.transactions, tempUTxO, b.height);
+      if (newUTxO === null) {
+        log.warn(`[node:${this.port}] candidate chain invalid at height=${b.height} (transactions)`);
+        return;
+      }
+      tempUTxO = newUTxO;
+    }
+
+    this.blocksByHash.set(block.hash, block);
+
+    const candidateTipTotalDifficulty = this.getTotalDifficulty(block.hash);
+    const currentTipTotalDifficulty = this.getTotalDifficulty(latest.hash);
+
+    this.totalDifficultyByHash.set(block.hash, candidateTipTotalDifficulty); //fixme: wykonywane w getTotalDifficulty
+
+    if (candidateTipTotalDifficulty > currentTipTotalDifficulty) {
+      log.info(`[node:${this.port}] performing reorg to new tip height=${block.height}, difficulty=${candidateTipTotalDifficulty} (oldTipHeight=${latest.height}, difficulty=${currentTipTotalDifficulty})`);
+      this.unspentTxOuts = tempUTxO;
+      const candidateChain = this.calculateChainFromTip(block.hash);
+      this.chain = candidateChain;
+      // @ts-ignore
+      this.chainTipHash = candidateChain[candidateChain.length - 1].hash;
+
+      const allMinedTxs: Transaction[] = [];
+      for (const b of this.chain) {
+        allMinedTxs.push(...b.data.transactions);
+      }
+      this.updateTransactionPool(allMinedTxs);
+
+      if (this.miner) this.requestMiningRestart();
     } else {
-        log.warn(`Block rejected: ${result.reason}`);
-    }
-  }
-
-  private processBlock = (block: Block, prevBlock: Block, unspentTxOuts: UnspentTxOut[], difficulty: number): { ok: boolean, newTxOs?: UnspentTxOut[], reason?: string } => {
-    const basicValidation = isValidNewBlock(block, prevBlock, difficulty);
-    if (!basicValidation) return { ok: false, reason: 'invalid structure' };
-
-    const newUTxOs = processTransactions(block.data.transactions, unspentTxOuts, block.height);
-    if (newUTxOs === null) {
-        return { ok: false, reason: 'invalid transactions in block' };
+      log.info(`[node:${this.port}] accepted block height=${block.height} on side chain (no reorg)`);
     }
 
-    return { ok: true, newTxOs: newUTxOs };
-};
-
-  private getLatestBlock(): Block {
-    const latest = this.chain[this.chain.length - 1];
-    if (!latest) throw new Error('chain empty');
-    return latest;
+    const waiting = this.orphanBlocks.get(block.hash);
+    if (waiting && waiting.length) {
+      this.orphanBlocks.delete(block.hash);
+      for (const orphan of waiting) {
+        log.debug(`[node:${this.port}] processing previously orphaned block height=${orphan.height} hash=${orphan.hash.slice(0, 16)}...`);
+        this.handleReceivedBlock(orphan);
+      }
+    }
   }
 
   private async registerAt(peerUrl: string) {
@@ -319,8 +421,18 @@ export class CebularzNode {
       if (!data.chain || !Array.isArray(data.chain)) throw new Error('no chain');
       const v = validateChain(data.chain, this.difficulty);
       if (!v.ok) throw new Error(`remote chain invalid: ${v.reason}`);
-      // FIXME: change in future - comparison based on accumulated difficulty, but not length
-      if (data.chain.length > this.chain.length) {
+
+      // Oblicz łączną trudność dla łańcucha z peera
+      let remoteTotalDifficulty = BigInt(0);
+      for (const b of data.chain) {
+        remoteTotalDifficulty += this.blockDifficultyWeight(b);
+      }
+
+      const localTip = this.getLatestBlock();
+      const localTotalDifficulty = this.getTotalDifficulty(localTip.hash);
+
+      if (remoteTotalDifficulty > localTotalDifficulty) {
+        // Przyjmujemy łańcuch z peera jako nowy kanoniczny i aktualizujemy mapy
         let tempUTxO: UnspentTxOut[] = [];
         for (let i = 0; i < data.chain.length; i++) {
           const block = data.chain[i];
@@ -332,12 +444,25 @@ export class CebularzNode {
           }
           tempUTxO = newUTxO;
         }
+
         this.chain = data.chain;
         this.unspentTxOuts = tempUTxO;
+
+        // Zbuduj blocksByHash i totalDifficultyByHash od nowa
+        this.blocksByHash.clear();
+        this.totalDifficultyByHash.clear();
+        for (const b of this.chain) {
+          this.blocksByHash.set(b.hash, b);
+        }
+        const tip = this.chain[this.chain.length - 1];
+        if (tip) {
+          this.chainTipHash = tip.hash;
+          this.getTotalDifficulty(tip.hash); // wypełni totalDifficultyByHash rekurencyjnie
+        }
+
         log.info(`[node:${this.port}] chain synced from ${peerUrl} height=${this.getLatestBlock().height}`);
         if (this.miner) this.requestMiningRestart();
       } else {
-        log.info(`[node:${this.port}] remote chain not longer (local=${this.chain.length}, remote=${data.chain.length})`);
       }
     } catch (e) {
       log.error(`[node:${this.port}] syncFromPeer failed ${peerUrl}:`, (e as Error).message);
@@ -383,7 +508,7 @@ export class CebularzNode {
 
         log.info(`[node:${this.port}] mined block height=${block.height} hash=${block.hash.slice(0, 16)}... attempts=${msg.attempts} ms=${msg.ms}`);
         this.broadcastBlock(block, undefined, []).then();
-        
+
         this.miningInProgress = false;
         if (this.miningRestartPending) {
           this.miningRestartPending = false;
