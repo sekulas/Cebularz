@@ -205,6 +205,16 @@ export class CebularzNode {
       res.json({chain: this.chain});
     });
 
+    // Zwróć blok o konkretnym hashu (lub 404 jeśli brak)
+    this.app.get('/blocks/:hash', (req, res) => {
+      const {hash} = req.params;
+      const block = hash ? this.blocksByHash.get(hash) : undefined;
+      if (!block) {
+        return res.status(404).json({ok: false, error: 'block not found'});
+      }
+      res.json({ok: true, block});
+    });
+
     // Zwróć najnowszy blok
     this.app.get('/blocks/latest', (_, res) => {
       res.json({
@@ -373,6 +383,8 @@ export class CebularzNode {
       list.push(block);
       this.orphanBlocks.set(block.prevHash, list);
       log.debug(`[node:${this.port}] stored orphan block height=${block.height} hash=${block.hash.slice(0, 16)}... prevHash(waiting for)=${block.prevHash.slice(0, 16)}...`);
+      log.debug(`[node:${this.port}] requesting missing parent block hash=${block.prevHash.slice(0, 16)}... from peers`);
+      this.tryFetchBlock(block.prevHash).then();
       return;
     }
 
@@ -798,6 +810,56 @@ export class CebularzNode {
         log.warn(`[node:${this.port}] ping fail ${peerPort}: ${(e as Error).message}`);
       }
     }
+  }
+
+  // pobiera bloki od peerów, o ile nie istnieje lokalnie - jeśli pobierze to wrzuca go do łańcucha
+  private async tryFetchBlock(hash: string): Promise<Block | null> {
+    if (!hash) return null;
+
+    // Jeśli już mamy ten blok lokalnie, zwróć go od razu
+    const local = this.blocksByHash.get(hash);
+    if (local) return local;
+
+    const peers = [...this.peers];
+    const myUrl = `http://localhost:${this.port}`;
+
+    for (const peer of peers) {
+      try {
+        const url = new URL(peer);
+        const peerLabel = url.port || peer;
+        log.debug(`[node:${this.port}] tryFetchBlock(${hash.slice(0, 16)}...) -> ${peerLabel}`);
+
+        const resp = await fetch(`${peer}/blocks/${hash}`);
+        if (!resp.ok) {
+          log.debug(`[node:${this.port}] peer ${peerLabel} has no block ${hash.slice(0, 16)}..., status=${resp.status}`);
+          continue;
+        }
+
+        const data = await resp.json() as { block?: Block | null };
+        if (!data.block) {
+          log.debug(`[node:${this.port}] peer ${peerLabel} returned empty block for ${hash.slice(0, 16)}...`);
+          continue;
+        }
+
+        const block = data.block;
+
+        // Spróbuj włączyć blok do naszego łańcucha (obsługa orphanów/reorgów jest w środku)
+        this.handleReceivedBlock(block);
+
+        const accepted = this.blocksByHash.get(block.hash);
+        if (accepted) {
+          log.info(`[node:${this.port}] fetched and accepted block height=${block.height} hash=${block.hash.slice(0, 16)}... from ${peerLabel}`);
+          return accepted;
+        }
+
+        log.warn(`[node:${this.port}] fetched block ${block.hash.slice(0, 16)}... from ${peerLabel}, but it was not accepted`);
+      } catch (e) {
+        log.warn(`[node:${this.port}] tryFetchBlock(${hash.slice(0, 16)}...) from ${peer} failed:`, (e as Error).message);
+      }
+    }
+
+    log.debug(`[node:${this.port}] tryFetchBlock(${hash.slice(0, 16)}...) not found at any peer`);
+    return null;
   }
 }
 
