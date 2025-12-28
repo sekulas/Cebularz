@@ -31,7 +31,7 @@ export class CebularzNode {
 
   private chain: Block[] = [];
 
-  // === Nowe struktury dla forków i orphanami ===
+  // required for reorg mgmt
   private blocksByHash: Map<string, Block> = new Map();
   private orphanBlocks: Map<string, Block[]> = new Map();
   private totalDifficultyByHash: Map<string, bigint> = new Map();
@@ -67,13 +67,11 @@ export class CebularzNode {
     }
   }
 
-  // Prosta funkcja wagi trudności dla jednego bloku
   private blockDifficultyWeight(block: Block): bigint {
-    // Można zastosować np. 2^difficulty, ale dla prostoty użyjemy po prostu difficulty jako BigInt
-    return BigInt(block.difficulty);
+    return BigInt(block.difficulty); //konwersja typów backward compatibility
   }
 
-  // Zwraca aktualny tip łańcucha kanonicznego
+  // Zwraca aktualny tip głównego łańcucha
   private getLatestBlock(): Block {
     if (this.chainTipHash) {
       const tip = this.blocksByHash.get(this.chainTipHash);
@@ -84,7 +82,7 @@ export class CebularzNode {
     return latest;
   }
 
-  // Przelicza kanoniczny chain[] od zadanej końcówki (hash tipa), genesis at idx 0
+  // Tworzy łańcuch, sekwencję bloków od genesis at idx 0, do zadanego tipa
   private calculateChainFromTip(block: Block): Block[] {
     const chain: Block[] = [];
     let current: Block | null = block;
@@ -100,7 +98,7 @@ export class CebularzNode {
     return chain;
   }
 
-  // Wylicza łączną trudność łańcucha kończącego się na tipHash
+  // Wylicza łączną trudność łańcucha kończącego się na tipie, aktualizuje wartości
   private getTotalDifficulty(tipHash: string): bigint {
     const cached = this.totalDifficultyByHash.get(tipHash);
     if (cached !== undefined) return cached;
@@ -257,8 +255,6 @@ export class CebularzNode {
 
       log.info(`[node:${this.port}] accepted block hash=${block.hash.slice(0, 16)} from ${sender || 'unknown'}...`);
 
-      const newLatest = this.getLatestBlock();
-
       if (!alreadyVisited) {
         this.broadcastBlock(block, sender, previousPeers).then();
       }
@@ -312,13 +308,13 @@ export class CebularzNode {
 
   // Wspólny helper: sprawdza konflikt transakcji względem aktualnego mempoola
   private isTxConflictingWithMempool(tx: Transaction): boolean {
-    // 1. Czy transakcja już jest w mempoolu po ID?
+    // transakcja już jest w mempoolu po ID?
     if (this.transactionPool.some(t => t.id === tx.id)) {
       log.trace(`Tx ${tx.id} already in mempool.`);
       return true;
     }
 
-    // 2. Zbierz wszystkie UTXO użyte przez transakcje w mempoolu
+    // wszystkie UTXO użyte przez transakcje w mempoolu
     const usedInMempool = new Set<string>();
     for (const poolTx of this.transactionPool) {
       for (const txIn of poolTx.txIns) {
@@ -326,7 +322,7 @@ export class CebularzNode {
       }
     }
 
-    // 3. Czy nowa transakcja próbuje użyć któregoś z nich?
+    // nowa transakcja próbuje użyć któregoś z utx0 użytych w mempoolu
     for (const txIn of tx.txIns) {
       const key = `${txIn.txOutId}:${txIn.txOutIndex}`;
       if (usedInMempool.has(key)) {
@@ -362,7 +358,7 @@ export class CebularzNode {
     this.transactionPool = this.transactionPool.filter(t => !minedIds.has(t.id));
   }
 
-  // Nowa obsługa przyjmowanego bloku z forkiem/orphanami i reorgiem
+  // obsługa przyjmowanego bloku wraz z forkami, orphanami i reorgiem
   private handleReceivedBlock(block: Block) {
     const latest = this.getLatestBlock();
 
@@ -397,15 +393,13 @@ export class CebularzNode {
 
 
     //co tutaj w sytuacji gdy wpadnie blok łączący orphan z resztą?
+    //odp - nic, zostaje dołączony do gałęzi, ewentualnie odpytujemy peery o parenta. W momencie gdy
+    // przyjdzie blok tip dla tej gałęzi to będziemy robić reorg
     const candidateChain: Block[] = this.calculateChainFromTip(block);
 
     const genesis = this.chain[0];  //createGenesisBlock();
-    if (!genesis || genesis.height !== 0) {
-      log.warn(`[node:${this.port}] genesis missing or invalid during candidate build`);
-      return;
-    }
 
-    if (!candidateChain[0] || candidateChain[0].hash !== genesis.hash) {
+    if (!candidateChain[0] || genesis == undefined || candidateChain[0].hash !== genesis.hash) {
       log.warn(`[node:${this.port}] candidate chain has different genesis, rejecting block height=${block.height}`);
       return;
     }
@@ -416,7 +410,7 @@ export class CebularzNode {
       if (!b) continue;
       const newUTxO = processTransactions(b.data.transactions, tempUTxO, b.height);
       if (newUTxO === null) {
-        log.warn(`[node:${this.port}] candidate chain invalid at height=${b.height} (transactions)`);
+        log.warn(`[node:${this.port}] candidate chain invalid at height=${b.height} (transactions - processTransactions)`);
         return;
       }
       tempUTxO = newUTxO;
@@ -427,15 +421,13 @@ export class CebularzNode {
     const candidateTipTotalDifficulty = this.getTotalDifficulty(block.hash);
     const currentTipTotalDifficulty = this.getTotalDifficulty(latest.hash);
 
-    // this.totalDifficultyByHash.set(block.hash, candidateTipTotalDifficulty); //fixme: wykonywane w getTotalDifficulty
-
+    // następuje reorganizacja, bo nowy jest dłuższy
     if (candidateTipTotalDifficulty > currentTipTotalDifficulty) {
-      // === REORG ===
       const oldCanonical = this.chain.slice(); // kopia starego kanonicznego łańcucha
 
       log.info(`[node:${this.port}] performing reorg to new tip height=${block.height}, difficulty=${candidateTipTotalDifficulty} (oldTipHeight=${latest.height}, difficulty=${currentTipTotalDifficulty})`);
 
-      // Ustaw nowy stan UTXO i nowy canonical chain
+      // Ustaw nowy stan UTXO i nowy łańcuch główny
       this.unspentTxOuts = tempUTxO;
       const newCanonical = this.calculateChainFromTip(block);
       this.chain = newCanonical;
@@ -446,8 +438,9 @@ export class CebularzNode {
       newCanonical.forEach(tx => newChainTxs.push(...tx.data.transactions));
       this.removeTxsFromTransactionPool(newChainTxs);
 
-      // === Requeue tx z bloków, które wypadły ===
-      // Zidentyfikuj bloki, które były w starym łańcuchu, a nie ma ich w nowym
+      // Dodanie tx z odłączonych bloków z powrotem do mempoola
+
+      // bloki, które były w starym łańcuchu, a nie ma ich w nowym
       const newHashes = new Set(newCanonical.map(b => b.hash));
       const detachedBlocks = oldCanonical.filter(b => !newHashes.has(b.hash));
 
