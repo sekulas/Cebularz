@@ -164,14 +164,21 @@ program
   .argument('<receiverAddress>', 'receiver address')
   .argument('<amount>', 'amount to send')
   .argument('<nodeUrl>', 'URL of the node')
-  .action(async (file, id, receiverAddress, amountStr, nodeUrl) => {
+  .option('-o, --omit', 'use empty master password')
+  .action(async (file, id, receiverAddress, amountStr, nodeUrl, opts: { omit?: boolean }) => {
     const amount = parseInt(amountStr);
-    
+
     const wallet = await Wallet.open(file);
 
-    const { masterPassword } = await inquirer.prompt([
-      { type: "password", name: 'masterPassword', message: 'Master password', mask: '*'}
-    ])
+    let masterPassword: string;
+    if (opts?.omit) {
+      masterPassword = '';
+    } else {
+      const ans = await inquirer.prompt([
+        { type: "password", name: 'masterPassword', message: 'Master password', mask: '*' }
+      ]);
+      masterPassword = ans.masterPassword;
+    }
 
     try {
       const privateKey = wallet.decryptPrivateKey(id, masterPassword)
@@ -205,12 +212,12 @@ program
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(tx)
       });
-      
+
       if (!sendRes.ok) {
         const errorText = await sendRes.text();
         throw new Error(`Node rejected transaction: ${sendRes.status} ${errorText}`);
       }
-      
+
       const result = await sendRes.json();
       log.info('Transaction accepted by node:', result);
     } catch (e) {
