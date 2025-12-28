@@ -47,13 +47,12 @@ export class CebularzNode {
   private unspentTxOuts: UnspentTxOut[] = [];
   private transactionPool: Transaction[] = [];
 
-
   constructor(cfg: NodeConfig) {
     this.port = cfg.port;
     this.bootstrap = cfg.bootstrap ?? [];
     this.miner = !!cfg.miner;
     if (typeof cfg.difficulty === 'number' && cfg.difficulty >= 0 && cfg.difficulty <= 64) this.difficulty = cfg.difficulty;
-    this.miningAddress = cfg.miningAddress
+    this.miningAddress = cfg.miningAddress;
     this.setupRoutes();
     this.initializeChain();
   }
@@ -86,9 +85,9 @@ export class CebularzNode {
   }
 
   // Przelicza kanoniczny chain[] od zadanej końcówki (hash tipa), genesis at idx 0
-  private calculateChainFromTip(tipHash: string): Block[] {
+  private calculateChainFromTip(block: Block): Block[] {
     const chain: Block[] = [];
-    let current = this.blocksByHash.get(tipHash) || null;
+    let current: Block | null = block;
     const seen = new Set<string>();
     while (current) {
       if (seen.has(current.hash)) break;
@@ -121,17 +120,72 @@ export class CebularzNode {
   private setupRoutes() {
     this.app.use(express.json());
 
+    // Zarządzanie miningiem
+    this.app.post('/mining/start', (_, res) => {
+      const oldStatus = this.miner && this.miningInProgress ? 'running' : 'stopped';
+      this.enableMining();
+      const newStatus = this.miner && this.miningInProgress ? 'running' : 'stopped';
+      log.info(`[node:${this.port}] mining start requested via REST`);
+      res.json({old: oldStatus, new: newStatus});
+    });
+
+    this.app.post('/mining/stop', (_, res) => {
+      const oldStatus = this.miner && this.miningInProgress ? 'running' : 'stopped';
+      this.disableMining();
+      const newStatus = this.miner && this.miningInProgress ? 'running' : 'stopped';
+      log.info(`[node:${this.port}] mining stop requested via REST`);
+      res.json({old: oldStatus, new: newStatus});
+    });
+
+    this.app.post('/mining/restart', (_, res) => {
+      const oldStatus = this.miner && this.miningInProgress ? 'running' : 'stopped';
+      this.performMiningRestart();
+      const newStatus = this.miner && this.miningInProgress ? 'running' : 'stopped';
+      log.info(`[node:${this.port}] mining restart requested via REST`);
+      res.json({old: oldStatus, new: newStatus});
+    });
+
     // Rejestracja peera
     this.app.post('/register', (req, res) => {
-      const {url} = req.body || {};
-      if (!url || typeof url !== 'string') {
-        return res.status(400).json({error: 'url required'});
+      let {url, urls} = req.body || {};
+      if ((!url && !urls) || (url && typeof url !== 'string') || (urls && (!Array.isArray(urls) || !urls.every((u: any) => typeof u === 'string')))) {
+        return res.status(400).json({error: 'url/urls required'});
       }
-      const requester = url;
+      urls = urls || [];
+      if (url) {
+        urls.push(url);
+      }
+
       const responder = `http://localhost:${this.port}`;
-      log.info(`[node:${this.port}] registering peer ${requester}`);
-      this.peers.add(requester);
-      res.json({ok: true, requester, responder, peers: [...this.peers]});
+
+      for (const requester of urls) {
+        if (!this.peers.has(requester))
+          log.info(`[node:${this.port}] registering peer ${requester}`);
+        this.peers.add(requester);
+      }
+
+      res.json({ok: true, urls, responder, peers: [...this.peers]});
+    });
+
+    // Derejestracja peera
+    this.app.post('/deregister', (req, res) => {
+      let {url, urls} = req.body || {};
+      if ((!url && !urls) || (url && typeof url !== 'string') || (urls && (!Array.isArray(urls) || !urls.every((u: any) => typeof u === 'string')))) {
+        return res.status(400).json({error: 'url/urls required'});
+      }
+      urls = urls || [];
+      if (url) {
+        urls.push(url);
+      }
+
+      const responder = `http://localhost:${this.port}`;
+
+      for (const requester of urls) {
+        if (this.peers.delete(requester))
+          log.info(`[node:${this.port}] deregistering peer ${requester}`);
+      }
+
+      res.json({ok: true, urls, responder, peers: [...this.peers]});
     });
 
     // Ping
@@ -246,30 +300,44 @@ export class CebularzNode {
     });
   }
 
+  // Wspólny helper: sprawdza konflikt transakcji względem aktualnego mempoola
+  private isTxConflictingWithMempool(tx: Transaction): boolean {
+    // 1. Czy transakcja już jest w mempoolu po ID?
+    if (this.transactionPool.some(t => t.id === tx.id)) {
+      log.trace(`Tx ${tx.id} already in mempool.`);
+      return true;
+    }
+
+    // 2. Zbierz wszystkie UTXO użyte przez transakcje w mempoolu
+    const usedInMempool = new Set<string>();
+    for (const poolTx of this.transactionPool) {
+      for (const txIn of poolTx.txIns) {
+        usedInMempool.add(`${txIn.txOutId}:${txIn.txOutIndex}`);
+      }
+    }
+
+    // 3. Czy nowa transakcja próbuje użyć któregoś z nich?
+    for (const txIn of tx.txIns) {
+      const key = `${txIn.txOutId}:${txIn.txOutIndex}`;
+      if (usedInMempool.has(key)) {
+        log.trace(`Tx ${tx.id} tries to double-spend UTXO already in mempool: ${key}`);
+        return true; // double-spend względem mempoola
+      }
+    }
+
+    return false;
+  }
+
   private addToTransactionPool(tx: Transaction): boolean {
     if (!validateTransaction(tx, this.unspentTxOuts)) {
-      log.warn(`Trying to add invalid tx to pool: ${tx.id}`);
-      return false;
-    }
-    if (this.transactionPool.find(t => t.id === tx.id)) {
       log.warn(`Tx already in pool: ${tx.id}`);
       return false;
     }
 
-    // Sprawdź czy UTXO nie są już użyte w innych transakcjach w mempool (double-spending)
-    const usedUTxOs = new Set<string>();
-    for (const poolTx of this.transactionPool) {
-      for (const txIn of poolTx.txIns) {
-        usedUTxOs.add(`${txIn.txOutId}:${txIn.txOutIndex}`);
-      }
-    }
-
-    for (const txIn of tx.txIns) {
-      const key = `${txIn.txOutId}:${txIn.txOutIndex}`;
-      if (usedUTxOs.has(key)) {
-        log.warn(`Tx ${tx.id} tries to double-spend UTXO already in mempool: ${key}`);
-        return false;
-      }
+    // Konflikt z mempoolem (duplikat lub double-spend)
+    if (this.isTxConflictingWithMempool(tx)) {
+      log.warn(`Tx ${tx.id} tries to double-spend UTXO already in mempool.`);
+      return false;
     }
 
     log.info(`Added tx to pool: ${tx.id}`);
@@ -279,7 +347,7 @@ export class CebularzNode {
     return true;
   }
 
-  private updateTransactionPool(minedTxs: Transaction[]) {
+  private removeTxsFromTransactionPool(minedTxs: Transaction[]) {
     const minedIds = new Set(minedTxs.map(t => t.id));
     this.transactionPool = this.transactionPool.filter(t => !minedIds.has(t.id));
   }
@@ -317,7 +385,7 @@ export class CebularzNode {
 
 
     //co tutaj w sytuacji gdy wpadnie blok łączący orphan z resztą?
-    const candidateChain: Block[] = this.calculateChainFromTip(block.hash);
+    const candidateChain: Block[] = this.calculateChainFromTip(block);
 
     const genesis = this.chain[0];  //createGenesisBlock();
     if (!genesis || genesis.height !== 0) {
@@ -347,21 +415,56 @@ export class CebularzNode {
     const candidateTipTotalDifficulty = this.getTotalDifficulty(block.hash);
     const currentTipTotalDifficulty = this.getTotalDifficulty(latest.hash);
 
-    this.totalDifficultyByHash.set(block.hash, candidateTipTotalDifficulty); //fixme: wykonywane w getTotalDifficulty
+    // this.totalDifficultyByHash.set(block.hash, candidateTipTotalDifficulty); //fixme: wykonywane w getTotalDifficulty
 
     if (candidateTipTotalDifficulty > currentTipTotalDifficulty) {
-      log.info(`[node:${this.port}] performing reorg to new tip height=${block.height}, difficulty=${candidateTipTotalDifficulty} (oldTipHeight=${latest.height}, difficulty=${currentTipTotalDifficulty})`);
-      this.unspentTxOuts = tempUTxO;
-      const candidateChain = this.calculateChainFromTip(block.hash);
-      this.chain = candidateChain;
-      // @ts-ignore
-      this.chainTipHash = candidateChain[candidateChain.length - 1].hash;
+      // === REORG ===
+      const oldCanonical = this.chain.slice(); // kopia starego kanonicznego łańcucha
 
-      const allMinedTxs: Transaction[] = [];
-      for (const b of this.chain) {
-        allMinedTxs.push(...b.data.transactions);
+      log.info(`[node:${this.port}] performing reorg to new tip height=${block.height}, difficulty=${candidateTipTotalDifficulty} (oldTipHeight=${latest.height}, difficulty=${currentTipTotalDifficulty})`);
+
+      // Ustaw nowy stan UTXO i nowy canonical chain
+      this.unspentTxOuts = tempUTxO;
+      const newCanonical = this.calculateChainFromTip(block);
+      this.chain = newCanonical;
+      this.chainTipHash = newCanonical[newCanonical.length - 1]?.hash ?? null;
+
+      // Zbierz transakcje z nowego łańcucha (będą usunięte z mempoola)
+      const newChainTxs: Transaction[] = [];
+      newCanonical.forEach(tx => newChainTxs.push(...tx.data.transactions));
+      this.removeTxsFromTransactionPool(newChainTxs);
+
+      // === Requeue tx z bloków, które wypadły ===
+      // Zidentyfikuj bloki, które były w starym łańcuchu, a nie ma ich w nowym
+      const newHashes = new Set(newCanonical.map(b => b.hash));
+      const detachedBlocks = oldCanonical.filter(b => !newHashes.has(b.hash));
+
+      const detachedTxs: Transaction[] = [];
+      detachedBlocks.forEach(b => detachedTxs.push(...b.data.transactions));
+
+      // Nie chcemy duplikować tx, które i tak są w nowej gałęzi
+      const newChainTxIds = new Set(newChainTxs.map(t => t.id));
+
+      for (const tx of detachedTxs) {
+        if (!tx || !tx.id) continue;
+        if (newChainTxIds.has(tx.id)) continue; // już w nowej gałęzi
+
+        // Sprawdź, czy transakcja jest poprawna względem NOWEGO stanu UTXO
+        // weryfikacja double spend
+        if (!validateTransaction(tx, this.unspentTxOuts)) {
+          log.debug(`[node:${this.port}] dropped tx ${tx.id} from detached block(s): invalid in new canonical state`);
+          continue;
+        }
+
+        if (this.isTxConflictingWithMempool(tx)) {
+          log.debug(`[node:${this.port}] dropped tx ${tx.id} from detached block(s): conflicts with current mempool`);
+          continue;
+        }
+
+        // Jeśli wszystko OK – wrzucamy z powrotem do mempoola
+        this.transactionPool.push(tx);
+        log.info(`[node:${this.port}] re-queued tx ${tx.id} from detached block(s) into mempool after reorg`);
       }
-      this.updateTransactionPool(allMinedTxs);
 
       if (this.miner) this.requestMiningRestart();
     } else {
@@ -549,6 +652,17 @@ export class CebularzNode {
     });
   }
 
+  private disposeInvalidTransactionsAtThisMoment(): void {
+    this.transactionPool = this.transactionPool.filter(t => {
+      if (!validateTransaction(t, this.unspentTxOuts)) {
+        log.warn(`[node:${this.port}] disposed invalid transaction from pool: ${t.id}, amt=${t.txOuts.reduce((a, b) => a + "+" + b.amount, "").slice(1)} to=${t.txOuts.map(to => to.address.slice(0, 8)).join(',')}`);
+        return false;
+      }
+      return true;
+    });
+
+  }
+
   private startMiningJob() {
     if (!this.miner) return;
     if (!this.miningWorker) this.initMiningWorker();
@@ -556,7 +670,18 @@ export class CebularzNode {
     const latest = this.getLatestBlock();
 
     const coinbaseTx = getCoinbaseTransaction(this.miningAddress, latest.height + 1);
+
+    this.disposeInvalidTransactionsAtThisMoment();
+
     const txsToMine = [coinbaseTx, ...this.transactionPool.slice(0, TX_PER_BLOCK)]
+
+    log.debug(`[node:${this.port}] starting mining job with ${txsToMine.length} txs (including coinbase)`);
+
+    const msg = txsToMine.reduce((pv, tx, idx) =>
+            pv + `\nTX[${idx}] amt=${tx.txOuts.reduce((a, b) => a + "+" + b.amount, "").slice(1)} to=${tx.txOuts.map(to => to.address.slice(0, 8)).join(',')}`,
+        `[node:${this.port}] mining txs:`
+    );
+    log.debug(msg)
 
     this.cancelSAB = new SharedArrayBuffer(4);
     const view = new Int32Array(this.cancelSAB);
@@ -602,6 +727,35 @@ export class CebularzNode {
     } else if (!this.miningInProgress) {
       this.startMiningJob();
     }
+  }
+
+  // Włączenie miningu (używane przez endpointy)
+  private enableMining() {
+    if (this.miner && this.miningInProgress) return;
+    this.miner = true;
+    this.initMiningWorker();
+    this.startMiningJob();
+  }
+
+  // Wyłączenie miningu (używane przez endpointy)
+  private disableMining() {
+    if (!this.miner && !this.miningInProgress) return;
+
+    this.miner = false;
+
+    if (this.cancelSAB) {
+      Atomics.store(new Int32Array(this.cancelSAB), 0, 1);
+    }
+
+    if (this.miningWorker) {
+      this.miningWorker.terminate().catch(err => {
+        log.error(`[node:${this.port}] error terminating mining worker:`, err);
+      });
+      this.miningWorker = null;
+    }
+
+    this.miningInProgress = false;
+    this.miningRestartPending = false;
   }
 
   start() {
