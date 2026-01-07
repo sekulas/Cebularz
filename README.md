@@ -59,25 +59,25 @@ npm run node -- -p 4002 -b http://localhost:4000,http://localhost:4001
 ## Uruchomienie (przykład: 1 górnik + 2 węzły pasywne)
 ### 1. Start minera
 ```bash
-npm run node -- -p 4500 --miner --difficulty 6
+npm run node -- -p 4500 --miner --difficulty 5
 ```
 ### 2. Start pierwszego węzła pasywnego (bootstrap do minera)
 ```bash
-npm run node -- -p 4501 -b http://localhost:4500 --difficulty 6
+npm run node -- -p 4501 -b http://localhost:4500 --difficulty 5
 ```
 ### 3. Start drugiego węzła pasywnego (bootstrap do minera i pierwszego węzła)
 ```bash
-npm run node -- -p 4502 -b http://localhost:4500,http://localhost:4501 --difficulty 6
+npm run node -- -p 4502 -b http://localhost:4500,http://localhost:4501 --difficulty 5
 ```
 
 ### 4. Start - przypięty do 4501
 ```bash
-npm run node -- -p 4503 -b http://localhost:4501 --difficulty 6
+npm run node -- -p 4503 -b http://localhost:4501 --difficulty 5
 ```
 
 ### 5. Start - przypięty do 4502
 ```bash
-npm run node -- -p 4504 -b http://localhost:4502 --difficulty 6
+npm run node -- -p 4504 -b http://localhost:4502 --difficulty 5
 ```
 
 ## Podgląd stanu (inne okno terminala)
@@ -162,10 +162,14 @@ curl -s http://localhost:4500/peers | jq
 
 ## Użycie - przykładowy scenariusz
 
+miner1: 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da
+miner2: 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56
+recipient: af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c
+
 ### 1. **Uruchom węzeł z minerem**
 ```bash
 # Terminal 1: Węzeł-górnik z adresem do nagrody
-npm run node -- --port 4500 --miner --address 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 --difficulty 6 
+npm run node -- --port 4500 --miner --address 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da --difficulty 6 
 ```
 
 **Adres** = SHA-256(publicKey) z tożsamości w portfelu
@@ -177,10 +181,23 @@ npm run node -- --port 4500 --miner --address 41e32ef2308173ce7ebfb9007d2f432935
 # [node:4500] Block accepted height=1 difficulty=2. UTXO set size: 1
 ```
 
+
+### 2a. **Uruchom węzeł z 2gim minerem**
+```bash
+# Terminal 1: Węzeł-górnik z adresem do nagrody
+npm run node -- --port 4501 -b http://localhost:4500 --miner --address 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56 --difficulty 6 
+```
+
+
 ### 3. **Sprawdź saldo minera**
 ```bash
 # Terminal 2: Sprawdź ile monet zarobił miner
-npm run wallet -- balance http://localhost:4500 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54
+npm run wallet -- balance http://localhost:4500 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da
+npm run wallet -- balance http://localhost:4500 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56
+
+# POV 2giego minera
+npm run wallet -- balance http://localhost:4501 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da
+npm run wallet -- balance http://localhost:4501 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56
 
 # Wynik: Balance for address ...: 500
 # (5 bloków × 100 monet = 500)
@@ -189,8 +206,13 @@ npm run wallet -- balance http://localhost:4500 41e32ef2308173ce7ebfb9007d2f4329
 ### 4. **Lista UTXO (opcjonalnie)**
 ```bash
 # Zobacz szczegóły niewydanych outputów
-npm run wallet -- utxos http://localhost:4500 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54
-curl http://localhost:4500/unspent/41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 | jq
+npm run wallet -- utxos http://localhost:4500 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da
+curl http://localhost:4500/unspent/50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da | jq
+curl http://localhost:4500/unspent/059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56 | jq
+
+# POV 2giego minera
+curl http://localhost:4501/unspent/50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da | jq
+curl http://localhost:4501/unspent/059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56 | jq
 ```
 
 ### 5. **Utwórz portfel odbiorcy**
@@ -205,10 +227,15 @@ npm run wallet -- add-identity receiver-wallet.json --label receiver
 
 ### 6. **Wyślij transakcję**
 ```bash
-# Terminal 2: Wyślij 50 monet z portfela minera do odbiorcy
-npm run wallet -- send mywallet.json 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 518ed3fb9eb55d7402da9027d0f04785c8494ceae8b379b32ed5b371f58d3bf9 50 http://localhost:4500
+# Terminal 2: Wyślij 49 monet z portfela minera do odbiorcy
+npm run wallet -- send mywallet.json 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c 49 http://localhost:4500 --omit
+npm run wallet -- send mywallet.json 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56 af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c 49 http://localhost:4500 --omit
+
+# POV 2giego minera
+npm run wallet -- send mywallet.json 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c 49 http://localhost:4501 --omit
+npm run wallet -- send mywallet.json 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56 af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c 49 http://localhost:4501 --omit
 ```
-> `npm run wallet -- send receiver-wallet.json 518ed3fb9eb55d7402da9027d0f04785c8494ceae8b379b32ed5b371f58d3bf9  41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54 12 http://localhost:4500`
+> `npm run wallet -- send receiver-wallet.json af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c  50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da 12 http://localhost:4500`
 
 ### 7. **Poczekaj na wykopanie bloku z transakcją**
 ```bash
@@ -220,8 +247,14 @@ npm run wallet -- send mywallet.json 41e32ef2308173ce7ebfb9007d2f432935d31eddb5e
 
 ### 8. **Sprawdź nowe salda**
 ```bash
-npm run wallet -- balance http://localhost:4500 41e32ef2308173ce7ebfb9007d2f432935d31eddb5eedf18b140b6490e2abd54
-npm run wallet -- balance http://localhost:4500 518ed3fb9eb55d7402da9027d0f04785c8494ceae8b379b32ed5b371f58d3bf9
+npm run wallet -- balance http://localhost:4500 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da
+npm run wallet -- balance http://localhost:4500 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56
+npm run wallet -- balance http://localhost:4500 af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c
+
+#POV 2giego minera
+npm run wallet -- balance http://localhost:4501 50cd2ae9a1d028dc0cd9049f0de7d79d8db43eef2f5be630c37344e0a72451da
+npm run wallet -- balance http://localhost:4501 059cd54d2a9743138fcc91fc1edfb8dfcd00ce7a1bf1bec2fe85ca93483a0d56
+npm run wallet -- balance http://localhost:4501 af03c37309160757411965177d9abd67fe0aba254f0b892c8bf9e60c2d7a881c
 ```
 
 ## Komendy CLI Wallet
