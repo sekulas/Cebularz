@@ -404,6 +404,7 @@ export class CebularzNode {
       return;
     }
 
+    // walidacja candidate chain od dołu (czy są odpowiednie txouty wykrozsytane, double-spend etc)
     let tempUTxO: UnspentTxOut[] = [];
     for (let i = 0; i < candidateChain.length; i++) {
       const b = candidateChain[i];
@@ -429,13 +430,13 @@ export class CebularzNode {
 
       // Ustaw nowy stan UTXO i nowy łańcuch główny
       this.unspentTxOuts = tempUTxO;
-      const newCanonical = this.calculateChainFromTip(block);
+      const newCanonical = this.calculateChainFromTip(block); //candidateChain;
       this.chain = newCanonical;
       this.chainTipHash = newCanonical[newCanonical.length - 1]?.hash ?? null;
 
       // Zbierz transakcje z nowego łańcucha (będą usunięte z mempoola)
       const newChainTxs: Transaction[] = [];
-      newCanonical.forEach(tx => newChainTxs.push(...tx.data.transactions));
+      newCanonical.forEach(blk => newChainTxs.push(...blk.data.transactions));
       this.removeTxsFromTransactionPool(newChainTxs);
 
       // Dodanie tx z odłączonych bloków z powrotem do mempoola
@@ -476,6 +477,7 @@ export class CebularzNode {
       log.info(`[node:${this.port}] accepted block height=${block.height} on side chain (no reorg)`);
     }
 
+    //sprawdzenie czy jakiś blok nie czeka na procesowany blok - jeśli czeka, to procesujemy każdy czekający blok
     const waiting = this.orphanBlocks.get(block.hash);
     if (waiting && waiting.length) {
       this.orphanBlocks.delete(block.hash);
@@ -841,17 +843,17 @@ export class CebularzNode {
 
         const accepted = this.blocksByHash.get(block.hash);
         if (accepted) {
-          log.info(`[node:${this.port}] fetched and accepted block height=${block.height} hash=${block.hash.slice(0, 16)}... from ${peerLabel}`);
+          // log.info(`[node:${this.port}] fetched and accepted block height=${block.height} hash=${block.hash.slice(0, 16)}... from ${peerLabel}`);
           return accepted;
         }
 
-        log.warn(`[node:${this.port}] fetched block ${block.hash.slice(0, 16)}... from ${peerLabel}, but it was not accepted`);
+        // log.warn(`[node:${this.port}] fetched block ${block.hash.slice(0, 16)}... from ${peerLabel}, but it was not accepted`);
       } catch (e) {
         log.warn(`[node:${this.port}] tryFetchBlock(${hash.slice(0, 16)}...) from ${peer} failed:`, (e as Error).message);
       }
     }
 
-    log.debug(`[node:${this.port}] tryFetchBlock(${hash.slice(0, 16)}...) not found at any peer`);
+    // log.debug(`[node:${this.port}] tryFetchBlock(${hash.slice(0, 16)}...) not found at any peer`);
     return null;
   }
 }

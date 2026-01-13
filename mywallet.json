@@ -1,0 +1,64 @@
+{
+  "identities": [
+    {
+      "id": "5951120453f0923eb8bb8f4d65c970eed814d4491e5c427793aa9419f8637ecb",
+      "label": "alpha",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA7YeziAZ7giZ34fx1Iy/ARVo4KmUTVeA0GUqUo1iPQhc=\n-----END PUBLIC KEY-----\n",
+      "encPrivMaster": {
+        "ct": "+5QbxgB06K/9akGalRyY3jsZuCAk1r4NTaWDoojVwCFCErnpGyhSsWKYCVBh9hPYFxBzGJsBLU9Y9T7mp/znwhwnGLukEUp2+nbEBxhwKnkM9GkJKmiY41V5IT2R8FDmlmpWSUf9UAQMmWFsJ9JKktyv1qYiH1M=",
+        "iv": "QHf50MWdy29vJQot",
+        "tag": "VAbI2Nrah1MR/1hjK1Dkzg==",
+        "algo": "aes-256-gcm"
+      }
+    },
+    {
+      "id": "a7d532a4ce1cc4c06d674665cb0bceb3ceda41c4ebdf1085e59901c2573528e3",
+      "label": "alpha",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAiZ/mLyHulgBKEiNZV00Hgb4EGU5S5E2Tv7HzRmjKxqM=\n-----END PUBLIC KEY-----\n",
+      "encPrivMaster": {
+        "ct": "PTTfrrEdKLLyETugdpwHVGVQmR8omB+EmuXNsS2Vm6lJI8mEZeR7KX+sWLt8UR5Ly7nqrwDo4xMqcaZPL7DYTl5bIVtfNJTZSRJ8BcE0Iw7JpM4RJKM6+JVMTCj8vIRlBFaaTeBUBT1QW5DrAgUfKZd2WglJARg=",
+        "iv": "+tXMCD9fluQUrK/L",
+        "tag": "O30qmLbOn97aeX0xsnV07A==",
+        "algo": "aes-256-gcm"
+      }
+    },
+    {
+      "id": "189ff8dd91f6692d04c074acb37fc97abb01d47888bd5fe50b0585fa5fdec3e9",
+      "label": "alpha",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAlNwNo1SGddwyeNDi3TTgn7RUl2OOwhNFWXKN7VZyijM=\n-----END PUBLIC KEY-----\n",
+      "encPrivMaster": {
+        "ct": "GMiQiqfL2c6V+T/EdPyXZbCESadAlKZDu7nAQOlF7Ou6Qa9TT8k94wrOkZc4oNXhQea+RD/JJ8UA0cABbWKYed0h0nO4ofstwDNhugvOvO3SIcFydB93rF6i9QntvLL86/trx5wj8ECD+zqZtbJUgFLbE2pbqxQ=",
+        "iv": "4aBF6GCAlnIuNKqb",
+        "tag": "NT5S7j7wUPHsuzTYf2ZqxA==",
+        "algo": "aes-256-gcm"
+      }
+    },
+    {
+      "id": "3c516ab9d27f4f8edee97577d19e05c518c4cf6f0921a2f6e1a44d383bf36d9a",
+      "label": "alpha",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA3QaJGoR3sk89qPUmwV7X9KZGqmN1KhHstSh7+36hgrg=\n-----END PUBLIC KEY-----\n",
+      "encPrivMaster": {
+        "ct": "PD5+89eIDyrQzjIH/BMjl5vYkoUUDg/5qazKRfUCawkgbZpZp9c2mmf39CMVgdWJxmtEnX+jRp2fZ+o/tKFCXXG0yIQZho8iifGO1g//mtAPCz+/eRdBQ+qi7DCFlTc7F+ClKpfgW9+/Cz1pQeh0TZbfdM5545g=",
+        "iv": "yxHRfNYzrIGvEr6R",
+        "tag": "5i8idaX1oi0T7Qm0+U8eSw==",
+        "algo": "aes-256-gcm"
+      }
+    }
+  ],
+  "master": {
+    "salt": "KyrYDUo4dLwd8esPm5wWNQ==",
+    "params": {
+      "N": 16384,
+      "r": 8,
+      "p": 1,
+      "dkLen": 32
+    },
+    "sentinel": {
+      "ct": "f/7Y8jd/ibiJZE8Ww8QsSHt9ZQvmFcrhBxHAm1rdmB7/OU5X9TZREOp6xpDf4JGsm04jII4rBUan4rWFbyl9YA==",
+      "iv": "NwaV0ZACvlo3zZ+E",
+      "tag": "tiJmMGs6zyl3obkRtAQzpQ==",
+      "algo": "aes-256-gcm"
+    },
+    "sentinelHash": "bc19e3c794a3b928e4e9207d4a4e44a1d3be0cace78a07cf91aa43f87486c6ff"
+  }
+}
